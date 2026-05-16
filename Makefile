@@ -1,37 +1,48 @@
-TARGET = myos
-CC = gcc
-LD = ld
-CFLAGS = -m32 -ffreestanding -nostdlib -fno-pic -fno-pie
-LDFLAGS = -m elf_i386 -T linker.ld
+ISO_DIR := iso
+BUILD   := build
 
-OBJS = boot.o kernel.o console.o keyboard.o
+CC := gcc
+AS := nasm
+LD := ld
 
-all: $(TARGET).iso
+CFLAGS := -m32 -ffreestanding -fno-pic -fno-stack-protector -fno-builtin -O2 -Wall -Wextra
+LDFLAGS := -m elf_i386
 
-boot.o: boot.s
+SRC_C := src/kmain.c src/idt.c src/keyboard.c src/console.c src/timer.c src/heap.c src/memory.c src/paging.c
+SRC_S := src/boot.S src/isr.S
+
+OBJ := $(patsubst src/%.c,$(BUILD)/%.o,$(SRC_C)) \
+       $(patsubst src/%.S,$(BUILD)/%.o,$(SRC_S))
+
+.PHONY: all clean iso run
+
+all: $(BUILD)/kernel.elf
+
+$(BUILD):
+	@mkdir -p $(BUILD)
+
+$(BUILD)/%.o: src/%.c | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-kernel.o: kernel.c
-	$(CC) $(CFLAGS) -c $< -o $@
+$(BUILD)/%.o: src/%.S | $(BUILD)
+	$(AS) -f elf32 $< -o $@
 
-$(TARGET).bin: $(OBJS)
-	$(LD) $(LDFLAGS) -o $@ $(OBJS)
+$(BUILD)/kernel.elf: $(OBJ) src/linker.ld
+	$(LD) $(LDFLAGS) -T src/linker.ld -o $@ $(OBJ)
 
-grub.cfg:
-	mkdir -p iso/boot/grub
-	echo 'set timeout=0' > iso/boot/grub/grub.cfg
-	echo 'set default=0' >> iso/boot/grub/grub.cfg
-	echo 'menuentry "MyOS" {' >> iso/boot/grub/grub.cfg
-	echo '  multiboot /boot/$(TARGET).bin' >> iso/boot/grub/grub.cfg
-	echo '  boot' >> iso/boot/grub/grub.cfg
-	echo '}' >> iso/boot/grub/grub.cfg
+iso: all
+	@mkdir -p $(ISO_DIR)/boot/grub
+	@cp $(BUILD)/kernel.elf $(ISO_DIR)/boot/kernel.elf
+	@echo "set timeout=0" > $(ISO_DIR)/boot/grub/grub.cfg
+	@echo "set default=0" >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo "menuentry \"myos\" {" >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo "    multiboot2 /boot/kernel.elf" >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo "    boot" >> $(ISO_DIR)/boot/grub/grub.cfg
+	@echo "}" >> $(ISO_DIR)/boot/grub/grub.cfg
+	grub-mkrescue -o myos.iso $(ISO_DIR)
 
-$(TARGET).iso: $(TARGET).bin grub.cfg
-	cp $(TARGET).bin iso/boot/
-	grub-mkrescue -o $(TARGET).iso iso
-
-run: $(TARGET).iso
-	qemu-system-i386 -cdrom $(TARGET).iso
+run: iso
+	qemu-system-i386 -cdrom myos.iso -serial stdio -display curses
 
 clean:
-	rm -rf *.o *.bin *.iso iso
+	rm -rf $(BUILD) myos.iso $(ISO_DIR)
