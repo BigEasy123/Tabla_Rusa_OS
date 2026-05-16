@@ -79,10 +79,12 @@ void keyboard_handler(void) {
     if (sc & 0x80) return;
 
     char c = shift_down ? shift_keymap[sc] : keymap[sc];
-    if(c >= 'a' && c <= 'z' && caps_on)
-        c = (char)(c - 'a' + 'A');
-    else if(c >= 'A' && c <= 'Z' && caps_on && !shift_down)
-        c = (char)(c - 'A' + 'a');
+    if(caps_on){
+        if(!shift_down && c >= 'a' && c <= 'z')
+            c = (char)(c - 'a' + 'A');
+        else if(shift_down && c >= 'A' && c <= 'Z')
+            c = (char)(c - 'A' + 'a');
+    }
     if (!c) return;
     if (kb_len < 127) kb_buffer[kb_len++] = (int)c;
 }

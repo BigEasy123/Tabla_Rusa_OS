@@ -8,7 +8,7 @@ LD := ld
 CFLAGS := -m32 -ffreestanding -fno-pic -fno-stack-protector -fno-builtin -O2 -Wall -Wextra
 LDFLAGS := -m elf_i386
 
-SRC_C := src/kmain.c src/idt.c src/keyboard.c src/console.c src/timer.c src/heap.c src/memory.c src/paging.c
+SRC_C := src/kmain.c src/idt.c src/keyboard.c src/console.c src/timer.c src/heap.c src/memory.c src/paging.c src/fs.c
 SRC_S := src/boot.S src/isr.S
 
 OBJ := $(patsubst src/%.c,$(BUILD)/%.o,$(SRC_C)) \
@@ -42,7 +42,7 @@ iso: all
 	grub-mkrescue -o myos.iso $(ISO_DIR)
 
 run: iso
-	qemu-system-i386 -cdrom myos.iso -serial stdio -display curses
+	qemu-system-i386 -cdrom myos.iso -display curses -serial file:serial.log
 
 clean:
 	rm -rf $(BUILD) myos.iso $(ISO_DIR)
