@@ -1,0 +1,82 @@
+Tabla Rusa OS booting...
+memory ok
+heap ok
+paging ok
+idt ok
+pic ok
+timer ok
+keyboard ok
+Booted! Type 'help' to begin.
+/home > help
+Commands:
+  help        - show this help
+  echo ARG    - print ARG
+  pwd, ls, cd - navigate RAM filesystem
+  cat FILE    - print a file
+  touch FILE  - create an empty file
+  write F TXT - replace file contents
+  mkdir DIR   - create a directory
+  rm PATH     - remove empty dir or file
+  edit FILE   - open line editor
+  cls         - clear screen
+  about       - kernel info
+  fault       - test exception handler
+  ticks       - show PIT ticks
+  uptime      - show uptime seconds
+  sleep N     - sleep N ticks
+  mem         - show memory summary
+  mmap        - print memory map
+  heap        - show heap state
+  alloc N     - bump-allocate N bytes
+  paging      - show paging state
+  regs        - show basic CPU flags
+  test        - run safe command checks
+  halt        - stop CPU
+  reboot      - keyboard-controller reboot
+/home > clear
+/home > hello
+Unknown command: 'hello'. Type 'help'.
+/home > print"hello"
+Unknown command: 'print"hello"'. Type 'help'.
+/home > help
+Commands:
+  help        - show this help
+  echo ARG    - print ARG
+  pwd, ls, cd - navigate RAM filesystem
+  cat FILE    - print a file
+  touch FILE  - create an empty file
+  write F TXT - replace file contents
+  mkdir DIR   - create a directory
+  rm PATH     - remove empty dir or file
+  edit FILE   - open line editor
+  cls         - clear screen
+  about       - kernel info
+  fault       - test exception handler
+  ticks       - show PIT ticks
+  uptime      - show uptime seconds
+  sleep N     - sleep N ticks
+  mem         - show memory summary
+  mmap        - print memory map
+  heap        - show heap state
+  alloc N     - bump-allocate N bytes
+  paging      - show paging state
+  regs        - show basic CPU flags
+  test        - run safe command checks
+  halt        - stop CPU
+  reboot      - keyboard-controller reboot
+/home > touch hello
+/home > edit hello
+Editing hello. Type lines to append. Commands: .show .clear .save .quit
+edit> Wassap!!!!
+edit> 
+edit> save
+edit> 
+edit> 
+edit> 
+edit> 
+edit> helphell
+edit> \exit
+edit> halt
+edit> 
+edit> 
+edit> 
