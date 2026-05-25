@@ -15,191 +15,53 @@ pic ok
 timer ok
 keyboard ok
 Ready.
-tr:/home $ 
-tr:/home $ help
-Commands:
-  help        - show this help
-  echo ARG    - print ARG
-  pwd, ls, cd - navigate RAM filesystem
-  whoami      - print current user
-  uname       - print kernel/platform identity
-  history     - show recent shell commands
-  cat FILE    - print a file
-  cp/mv/stat/tree - inspect and move filesystem objects
-  touch FILE  - create an empty file
-  write F TXT - replace file contents
-  mkdir DIR   - create a directory
-  rm PATH     - remove empty dir or file
-  edit FILE   - open numbered line editor; Up/Down move, Esc exits
-  cls         - clear screen
-  about       - kernel info
-  fault       - test exception handler
-  ticks       - show PIT ticks
-  uptime      - show uptime seconds
-  sleep N     - sleep N ticks
-  mem         - show memory summary
-  mmap        - print memory map
-  heap        - show heap state
-  alloc N     - bump-allocate N bytes
-  paging      - show paging state
-  mounts      - show filesystem stack mounts
-  gui ARGS    - GUI foundation: status/start/stop/windows
-  window ARGS - window objects: list/focus/move/info
-  ps, kill P  - process table and stop process
-  compute A   - scientific scheduler profile/status/bench
-  math TOPIC  - linear algebra, number theory, groups, stats
-  job ARGS    - generic OS job scheduler: list/run/priority
-  service A   - service manager: list/start/stop/restart/status
-  user/cap A  - users and capabilities
-  event A     - reactive event rules
-  net ARGS    - network stack: status/up/down/ip/udp/tcp
-  security A  - security: status/audit/lock/unlock
-  structure   - show current OS subsystem layout
-  log ARGS    - logs: show/write/clear system|security|network
-  regs        - show basic CPU flags
-  test        - run safe command checks
-  pkg ARGS    - package registry: list/info/install/remove/compat
-  halt        - stop CPU
-  reboot      - keyboard-controller reboot
-Native language forms:
-  inspect memory|heap|paging|processes|filesystem|gui|security|network
-  file["PATH"].read() / exists() / write("TEXT") / append("TEXT")
-  process["shell"].trace() / process["editor"].restart()
-  service["network"].start() / window["shell"].focus()
-  user["guest"].login() / event["net-audit"].emit()
-  package["editor"].install() / info() / remove()
-  spawn editor [FILE]
-tr:/home $ clear
-tr:/home $ about
-Tabla Rusa OS 0.0.6 (i386, multiboot2)
-native shell/language runtime: tabla:0.1
-subsystems: vfs security gui-foundation tcpip-foundation audit
-tr:/home $ structure
-structure:
-  kernel: memory paging idt timer keyboard heap
-  runtime: shell native-objects events jobs process-table
-  storage: vfs ramfs procfs sysfs devfs pkgfs mathfs
-  services: security logger package network gui events
-  science: math objects job queue latex converter benchmarks
-next good layers: ELF loader, framebuffer, sockets API, persistent disk
 tr:/home $ test
-console: ok
-timer: ticks=10121
+Tabla Rusa OS selftest
+[ok]   console
+timer: ticks=598
 memory: entries=6 usable_kib=130559
-paging: on
-fs /home: ok
-fs /home/math: ok
-process compute: ok
-security user=root secure_mode=on
-tr:/home $ tree /
-[d] /
-  [d] home
-    [d] docs
-    [d] math
-    [d] projects
-    [d] downloads
-    [f] readme.txt 312B
-  [d] bin
-  [d] boot
-    [f] kernel.cfg 46B
-  [d] config
-    [f] system.conf 59B
-  [d] dev
-    [f] keyboard 33B
-    [f] console 37B
-  [d] lib
-  [d] mnt
-  [d] pkg
-    [f] core.manifest 118B
-    [f] editor.manifest 128B
-    [f] shellkit.manifest 133B
-    [f] fs-tools.manifest 123B
-    [f] gui-core.manifest 139B
-    [f] net-tcpip.manifest 130B
-    [f] sec-core.manifest 136B
-    [f] net-stub.manifest 141B
-  [d] proc
-    [f] version 35B
-    [f] mounts 58B
-  [d] services
-    [f] logger 45B
-    [f] network 47B
-    [f] gui 52B
-  [d] share
-    [d] docs
-      [f] fs-stack.txt 68B
-      [f] tcpip-stack.txt 58B
-      [f] gui-roadmap.txt 69B
-      [f] native-objects.txt 62B
-      [f] scientific-scheduling.txt 157B
-      [f] math-kernel.txt 618B
-  [d] system
-    [d] gui
-      [f] README 53B
-    [d] net
-      [f] README 54B
-    [d] security
-      [f] README 61B
-  [d] tmp
-  [d] users
-    [d] root
-      [f] profile 19B
-    [f] guest.profile 34B
-  [d] var
-    [d] log
-      [f] system.log 258B
-      [f] security.log 74B
-      [f] network.log 70B
-tr:/home $ fsstack
-ramfs on / rw - volatile boot filesystem
-procfs on /proc ro - kernel introspection view
-sysfs on /system ro - subsystem object namespace
-devfs on /dev rw - device object namespace
-pkgfs on /pkg rw - package manifest registry
-mathfs on /home/math rw - scientific object workspace
-tr:/home $ write /home/test.txt
-usage: write FILE TEXT
-tr:/home $ edit /home/notes.txt
+[ok]   paging enabled
+[ok]   fs /home
+[ok]   fs /home/math
+[ok]   fs write/read
+[ok]   fd open
 event fs-audit -> log filesystem mutation
-event editor-focus -> window editor focus
-Editing /home/notes.txt   Up/Down move  Enter save line  Esc exit
----------------------------------------------------------------
-> 01 | 
-edit> hello
-Editing /home/notes.txt   Up/Down move  Enter save line  Esc exit
----------------------------------------------------------------
-  01 | hello
-> 02 | 
-edit> hello
-Editing /home/notes.txt   Up/Down move  Enter save line  Esc exit
----------------------------------------------------------------
-  01 | hello
-  02 | hello
-> 03 | 
-Editing /home/notes.txt   Up/Down move  Enter save line  Esc exit
----------------------------------------------------------------
-  01 | hello
-> 02 | hello
-Editing /home/notes.txt   Up/Down move  Enter save line  Esc exit
----------------------------------------------------------------
-> 01 | hello
-  02 | hello
-Editing /home/notes.txt   Up/Down move  Enter save line  Esc exit
----------------------------------------------------------------
-> 01 | hello
-  02 | hello
-Editing /home/notes.txt   Up/Down move  Enter save line  Esc exit
----------------------------------------------------------------
-  01 | hello
-> 02 | hello
-edit> hell
-Editing /home/notes.txt   Up/Down move  Enter save line  Esc exit
----------------------------------------------------------------
-  01 | hello
-  02 | hell
-> 03 | 
-Editing /home/notes.txt   Up/Down move  Enter save line  Esc exit
----------------------------------------------------------------
-  01 | hello
-> 02 | hell
-editor closed
+[ok]   fd write
+[ok]   fd read
+[ok]   fd close
+[ok]   process compute
+[ok]   program /bin/hello.trx
+[ok]   program /bin/mathbench.trx
+[ok]   program /bin/gui.trx
+[ok]   program /bin/netup.trx
+[ok]   program /bin/physics.trx
+[ok]   program /bin/readme.trx
+[ok]   program /bin/paint.trx
+exec /bin/hello.trx kind=trx-bytecode
+entry: PRINT
+hello-from-trx
+[ok]   loader run hello
+true
+[ok]   object dispatcher
+[ok]   scheduler yield
+fb mode=640x480x32 surfaces=3 pixels=0 rects=0 mouse=32,24
+[ok]   framebuffer descriptor
+[ok]   vector gfx manifest
+[ok]   trx runtime docs
+[ok]   network stack descriptor
+[ok]   block descriptor
+[ok]   Rusa docs
+[ok]   Rusa stdlib
+[ok]   Rusa object docs
+security user=root secure_mode=on
+selftest pass=28 fail=0
+tr:/home $ project new orbit
+project created orbit
+tr:/home $ trx append orbit CALL math phys orbit 10 5
+appended /home/projects/orbit.rusa
+tr:/home $ project run orbit
+exec /home/projects/orbit.rusa kind=trx-file
+entry: bytecode
+hello-from-project
+trx halt
+orbital_v2_scaled=1334

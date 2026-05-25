@@ -1,6 +1,8 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "console.h"
+#include "block.h"
+#include "editor.h"
 #include "events.h"
 #include "fb.h"
 #include "fd.h"
@@ -11,6 +13,7 @@
 #include "idt.h"
 #include "jobs.h"
 #include "keyboard.h"
+#include "lang.h"
 #include "loader.h"
 #include "mathlib.h"
 #include "memory.h"
@@ -18,6 +21,7 @@
 #include "object.h"
 #include "paging.h"
 #include "process.h"
+#include "project.h"
 #include "security.h"
 #include "sched.h"
 #include "service.h"
@@ -30,23 +34,11 @@
 
 #define INBUF_MAX 128
 #define HISTORY_MAX 8
-#define EDITOR_MAX_LINES 20
-#define EDITOR_LINE_MAX 72
-#define PKG_MAX 8
+#define PKG_MAX 11
 #define MOUNT_MAX 5
 #define USER_MAX 4
 #define SERVICE_MAX 6
 #define EVENT_MAX 4
-static char inbuf[INBUF_MAX];
-static size_t input_cursor = 0;
-static char history[HISTORY_MAX][INBUF_MAX];
-static size_t history_count = 0;
-static int history_view = -1;
-static int editor_active = 0;
-static char editor_path[64];
-static char editor_lines[EDITOR_MAX_LINES][EDITOR_LINE_MAX];
-static size_t editor_line_count = 0;
-static size_t editor_current_line = 0;
 
 struct pkg_manifest {
     const char* name;
@@ -65,7 +57,10 @@ static struct pkg_manifest packages[PKG_MAX] = {
     {"gui-core", "0.0", "framebuffer compositor foundation", "tabla:0.1;i386;abi=kernel", "/pkg/gui-core.manifest", 0},
     {"net-tcpip", "0.0", "TCP/IP stack foundation", "tabla:0.1;i386;abi=kernel", "/pkg/net-tcpip.manifest", 0},
     {"sec-core", "0.0", "capability and audit policy foundation", "tabla:0.1;i386;abi=kernel", "/pkg/sec-core.manifest", 1},
-    {"net-stub", "0.0", "portable network package placeholder", "tabla:any;arch=any;abi=manifest", "/pkg/net-stub.manifest", 0}
+    {"net-stub", "0.0", "portable network package placeholder", "tabla:any;arch=any;abi=manifest", "/pkg/net-stub.manifest", 0},
+    {"rusa-core", "0.1", "Rusa native language keywords and object model", "rusa:0.1;i386;abi=language", "/pkg/rusa-core.manifest", 1},
+    {"rusa-stdlib", "0.1", "Rusa TRX standard library package", "rusa:0.1;arch=any;abi=trx", "/pkg/rusa-stdlib.manifest", 1},
+    {"rusa-docs", "0.1", "Rusa examples, docs, and tutorials", "rusa:0.1;arch=any;abi=docs", "/pkg/rusa-docs.manifest", 1}
 };
 
 struct mount_info {
@@ -185,127 +180,30 @@ static void print_file_text(const char* text){
 }
 
 static void history_add(const char* line){
-    if(line[0] == 0)
-        return;
-    if(history_count < HISTORY_MAX){
-        str_copy(history[history_count++], line, INBUF_MAX);
-        return;
-    }
-    for(size_t i=1; i<HISTORY_MAX; i++)
-        str_copy(history[i-1], history[i], INBUF_MAX);
-    str_copy(history[HISTORY_MAX-1], line, INBUF_MAX);
+    shell_history_add(line);
 }
 
 static void prompt(void){
-    char cwd[64];
-    char line[112];
-    if(editor_active){
-        line[0] = 'e'; line[1] = 'd'; line[2] = 'i'; line[3] = 't'; line[4] = '>';
-        line[5] = ' '; line[6] = 0;
-        console_input_write(line);
-        return;
-    }
-    fs_pwd(cwd, sizeof(cwd));
-    size_t i = 0;
-    line[i++] = 't';
-    line[i++] = 'r';
-    line[i++] = ':';
-    for(size_t j=0; cwd[j] && i + 4 < sizeof(line); j++)
-        line[i++] = cwd[j];
-    line[i++] = ' ';
-    line[i++] = '$';
-    line[i++] = ' ';
-    line[i] = 0;
-    console_input_write(line);
+    shell_set_editor_mode(editor_is_active());
+    shell_prompt();
 }
 
 static void redraw_input(size_t* len){
-    char prefix[96];
-    char line[INBUF_MAX + 96];
-    size_t prefix_len;
-    if(editor_active){
-        str_copy(prefix, "edit> ", sizeof(prefix));
-    } else {
-        char cwd[64];
-        fs_pwd(cwd, sizeof(cwd));
-        size_t i = 0;
-        prefix[i++] = 't';
-        prefix[i++] = 'r';
-        prefix[i++] = ':';
-        for(size_t j=0; cwd[j] && i + 4 < sizeof(prefix); j++)
-            prefix[i++] = cwd[j];
-        prefix[i++] = ' ';
-        prefix[i++] = '$';
-        prefix[i++] = ' ';
-        prefix[i] = 0;
-    }
-    prefix_len = str_len(prefix);
-    if(input_cursor > *len)
-        input_cursor = *len;
-    size_t i = 0;
-    for(size_t j=0; prefix[j] && i + 1 < sizeof(line); j++)
-        line[i++] = prefix[j];
-    for(size_t j=0; inbuf[j] && i + 1 < sizeof(line); j++)
-        line[i++] = inbuf[j];
-    line[i] = 0;
-    console_input_write_at(line, prefix_len + input_cursor);
-    *len = str_len(inbuf);
-}
-
-static void set_input_text(const char* text, size_t* len){
-    str_copy(inbuf, text, INBUF_MAX);
-    *len = str_len(inbuf);
-    input_cursor = *len;
-    redraw_input(len);
-}
-
-static void set_input_text_cursor(const char* text, size_t cursor, size_t* len){
-    str_copy(inbuf, text, INBUF_MAX);
-    *len = str_len(inbuf);
-    input_cursor = cursor > *len ? *len : cursor;
-    redraw_input(len);
+    shell_set_editor_mode(editor_is_active());
+    shell_redraw(len);
 }
 
 static void input_insert_char(char c, size_t* len){
-    if(*len >= INBUF_MAX - 1)
-        return;
-    if(input_cursor > *len)
-        input_cursor = *len;
-    for(size_t i=*len + 1; i>input_cursor; i--)
-        inbuf[i] = inbuf[i - 1];
-    inbuf[input_cursor++] = c;
-    (*len)++;
-    inbuf[*len] = 0;
-    redraw_input(len);
+    shell_insert_char(c, len);
 }
 
 static void input_backspace(size_t* len){
-    if(*len == 0 || input_cursor == 0)
-        return;
-    if(input_cursor > *len)
-        input_cursor = *len;
-    for(size_t i=input_cursor - 1; i<*len; i++)
-        inbuf[i] = inbuf[i + 1];
-    (*len)--;
-    input_cursor--;
-    inbuf[*len] = 0;
-    redraw_input(len);
+    shell_backspace(len);
 }
 
 static void console_echo_command(const char* line){
-    if(editor_active){
-        console_puts("edit> ");
-        console_puts(line);
-        console_putc('\n');
-        return;
-    }
-    char cwd[64];
-    fs_pwd(cwd, sizeof(cwd));
-    console_puts("tr:");
-    console_puts(cwd);
-    console_puts(" $ ");
-    console_puts(line);
-    console_putc('\n');
+    shell_set_editor_mode(editor_is_active());
+    shell_echo_command(line);
 }
 
 static void cmd_help(void){
@@ -317,6 +215,7 @@ static void cmd_help(void){
     console_puts("  uname       - print kernel/platform identity\n");
     console_puts("  history     - show recent shell commands\n");
     console_puts("  cat FILE    - print a file\n");
+    console_puts("  block ARGS  - block device: status/read/write/save/load\n");
     console_puts("  fd ARGS     - file descriptors: open/read/write/close/list\n");
     console_puts("  cp/mv/stat/tree - inspect and move filesystem objects\n");
     console_puts("  touch FILE  - create an empty file\n");
@@ -347,6 +246,7 @@ static void cmd_help(void){
     console_puts("  sched ARGS  - cooperative scheduler: list/yield/wake/sleep/quantum\n");
     console_puts("  taskman A   - task manager: top/ps/jobs/services/kill/boost\n");
     console_puts("  loader A    - executable loader: list/info/run\n");
+    console_puts("  lang A      - Rusa language docs: about/keywords/examples/docs\n");
     console_puts("  object A    - unified native object dispatcher\n");
     console_puts("  service A   - service manager: list/start/stop/restart/status\n");
     console_puts("  user/cap A  - users and capabilities\n");
@@ -358,6 +258,7 @@ static void cmd_help(void){
     console_puts("  regs        - show basic CPU flags\n");
     console_puts("  test        - run safe command checks\n");
     console_puts("  pkg ARGS    - package registry: list/info/install/remove/compat\n");
+    console_puts("  project A   - Rusa projects: list/new/run/docs/edit\n");
     console_puts("  halt        - stop CPU\n");
     console_puts("  reboot      - keyboard-controller reboot\n");
     console_puts("Native language forms:\n");
@@ -439,12 +340,7 @@ static void cmd_whoami(void){
 }
 
 static void cmd_history(void){
-    for(size_t i=0; i<history_count; i++){
-        console_write_dec((uint32_t)(i + 1));
-        console_puts("  ");
-        console_puts(history[i]);
-        console_putc('\n');
-    }
+    shell_history_cmd();
 }
 
 static const char* first_arg(char* arg, char** rest);
@@ -669,8 +565,8 @@ static void cmd_kill(char* arg){
         console_puts("kill: protected or unknown process\n");
         return;
     }
-    if(cmd_is(arg, "editor"))
-        editor_active = 0;
+    if(cmd_is(arg, "editor") && editor_is_active())
+        editor_close();
     os_log("system", "process: stopped by shell");
     console_puts("stopped process ");
     console_puts(arg);
@@ -1015,6 +911,12 @@ static void pkg_install(struct pkg_manifest* pkg){
     }
     pkg->installed = 1;
     pkg_write_manifest(pkg);
+    if(cmd_is(pkg->name, "rusa-core") || cmd_is(pkg->name, "rusa-docs") || cmd_is(pkg->name, "rusa-stdlib"))
+        lang_init();
+    if(cmd_is(pkg->name, "gui-core"))
+        fb_init();
+    if(cmd_is(pkg->name, "net-tcpip"))
+        net_init();
     console_puts("installed ");
     console_puts(pkg->name);
     console_puts(" for ");
@@ -1069,160 +971,6 @@ static void cmd_pkg(char* arg){
     else if(cmd_is(action, "install")) pkg_install(pkg);
     else if(cmd_is(action, "remove") || cmd_is(action, "rm")) pkg_remove(pkg);
     else console_puts("pkg: unknown action\n");
-}
-
-static void editor_close(void){
-    editor_active = 0;
-    process_set_running("editor", 0);
-    editor_path[0] = 0;
-    editor_line_count = 0;
-    editor_current_line = 0;
-    console_clear_output();
-    console_puts("editor closed\n");
-}
-
-static void editor_line_no(size_t line){
-    uint32_t n = (uint32_t)(line + 1);
-    if(n < 10)
-        console_putc('0');
-    console_write_dec(n);
-}
-
-static void editor_render(void){
-    console_clear_output();
-    console_puts("Editing ");
-    console_puts(editor_path);
-    console_puts("   Arrows move  Enter saves line  :w save  :q quit  Esc exit\n");
-    console_puts("---------------------------------------------------------------\n");
-    for(size_t i=0; i<editor_line_count; i++){
-        console_putc(i == editor_current_line ? '>' : ' ');
-        console_putc(' ');
-        editor_line_no(i);
-        console_puts(" | ");
-        console_puts(editor_lines[i]);
-        console_putc('\n');
-    }
-    if(editor_line_count == 0 || editor_current_line == editor_line_count){
-        console_puts("> ");
-        editor_line_no(editor_line_count);
-        console_puts(" | \n");
-    }
-}
-
-static void editor_save(void){
-    char text[1024];
-    size_t pos = 0;
-    for(size_t line=0; line<editor_line_count; line++){
-        for(size_t i=0; editor_lines[line][i] && pos + 2 < sizeof(text); i++)
-            text[pos++] = editor_lines[line][i];
-        if(pos + 1 < sizeof(text))
-            text[pos++] = '\n';
-    }
-    text[pos] = 0;
-    fs_write(editor_path, text);
-}
-
-static void editor_load(const char* text){
-    size_t line = 0;
-    size_t col = 0;
-    for(size_t i=0; i<EDITOR_MAX_LINES; i++)
-        editor_lines[i][0] = 0;
-    if(text == 0 || text[0] == 0){
-        editor_line_count = 0;
-        editor_current_line = 0;
-        return;
-    }
-    for(size_t i=0; text[i] && line < EDITOR_MAX_LINES; i++){
-        if(text[i] == '\r')
-            continue;
-        if(text[i] == '\n'){
-            editor_lines[line][col] = 0;
-            line++;
-            col = 0;
-            continue;
-        }
-        if(col + 1 < EDITOR_LINE_MAX)
-            editor_lines[line][col++] = text[i];
-    }
-    if(line < EDITOR_MAX_LINES && (col > 0 || text[0] == '\n')){
-        editor_lines[line][col] = 0;
-        line++;
-    }
-    editor_line_count = line;
-    editor_current_line = editor_line_count;
-}
-
-static void editor_open(const char* path){
-    const char* text = "";
-    str_copy(editor_path, path, sizeof(editor_path));
-    fs_touch(editor_path);
-    fs_read(editor_path, &text);
-    editor_load(text);
-    editor_active = 1;
-    process_set_running("editor", 1);
-    window_focus("editor");
-    events_emit("process.start:editor");
-    editor_render();
-}
-
-static void editor_commit_line(const char* line){
-    if(editor_current_line < editor_line_count){
-        str_copy(editor_lines[editor_current_line], line, EDITOR_LINE_MAX);
-        if(editor_current_line + 1 < editor_line_count)
-            editor_current_line++;
-        else
-            editor_current_line = editor_line_count;
-    } else if(editor_line_count < EDITOR_MAX_LINES){
-        str_copy(editor_lines[editor_line_count], line, EDITOR_LINE_MAX);
-        editor_line_count++;
-        editor_current_line = editor_line_count;
-    } else {
-        console_puts("editor: line limit reached\n");
-    }
-    editor_save();
-    editor_render();
-}
-
-static void editor_move(int delta, size_t* len){
-    size_t desired_col = input_cursor;
-    if(delta < 0){
-        if(editor_current_line > 0)
-            editor_current_line--;
-    } else {
-        if(editor_current_line < editor_line_count)
-            editor_current_line++;
-    }
-    editor_render();
-    if(editor_current_line < editor_line_count)
-        set_input_text_cursor(editor_lines[editor_current_line], desired_col, len);
-    else
-        set_input_text("", len);
-}
-
-static void editor_move_horizontal(int delta, size_t* len){
-    if(delta < 0){
-        if(input_cursor > 0)
-            input_cursor--;
-        else if(editor_current_line > 0){
-            editor_current_line--;
-            editor_render();
-            set_input_text(editor_lines[editor_current_line], len);
-            return;
-        }
-    } else {
-        if(input_cursor < *len)
-            input_cursor++;
-        else if(editor_current_line < editor_line_count){
-            editor_current_line++;
-            editor_render();
-            if(editor_current_line < editor_line_count)
-                set_input_text_cursor(editor_lines[editor_current_line], 0, len);
-            else
-                set_input_text("", len);
-            return;
-        }
-    }
-    redraw_input(len);
 }
 
 static const char* skip_space_const(const char* s){
@@ -1410,13 +1158,12 @@ static int native_process_expr(const char* line){
         }
     } else if(str_starts(rest, "restart()")){
         if(cmd_is(name, "editor")){
-            if(editor_path[0] == 0)
-                str_copy(editor_path, "notes.txt", sizeof(editor_path));
-            editor_open(editor_path);
+            const char* path = editor_path_current();
+            editor_open(path[0] ? path : "notes.txt");
             console_puts("process[\"editor\"] restarted\n");
         } else if(cmd_is(name, "shell")){
-            history_view = -1;
-            inbuf[0] = 0;
+            size_t len = 0;
+            shell_reset_input(&len);
             console_puts("process[\"shell\"] restarted\n");
         } else {
             console_puts("process.restart: unsupported process\n");
@@ -1677,43 +1424,7 @@ static int native_eval(char* line){
     return 0;
 }
 
-static void editor_eval(char* line, size_t* len){
-    if(cmd_is(line, ".quit") || cmd_is(line, ".q") || cmd_is(line, ".exit") ||
-       cmd_is(line, ":q") || cmd_is(line, "exit")){
-        editor_close();
-        return;
-    }
-    if(cmd_is(line, ".save") || cmd_is(line, ".w")){
-        editor_save();
-        console_puts("saved ");
-        console_puts(editor_path);
-        console_putc('\n');
-        editor_render();
-        redraw_input(len);
-        return;
-    }
-    if(cmd_is(line, ".show")){
-        editor_render();
-        redraw_input(len);
-        return;
-    }
-    if(cmd_is(line, ".clear")){
-        editor_line_count = 0;
-        editor_current_line = 0;
-        editor_save();
-        editor_render();
-        set_input_text("", len);
-        console_puts("buffer cleared\n");
-        return;
-    }
-    editor_commit_line(line);
-    if(editor_current_line < editor_line_count)
-        set_input_text_cursor(editor_lines[editor_current_line], 0, len);
-    else
-        set_input_text("", len);
-}
-
-static void shell_eval(char* line){
+static void kernel_shell_dispatch(char* line){
     char* p=line;
     while(is_space(*p)) p++;
     if(native_eval(p))
@@ -1744,6 +1455,7 @@ static void shell_eval(char* line){
         else if(fs_read(arg, &text) == 0) print_file_text(text);
         else console_puts("cat: not found\n");
     }
+    else if(cmd_is(cmd,"block") || cmd_is(cmd,"disk")) block_cmd(arg);
     else if(cmd_is(cmd,"fd") || cmd_is(cmd,"fds")) fd_cmd(arg);
     else if(cmd_is(cmd,"stat")) cmd_stat(arg);
     else if(cmd_is(cmd,"tree")) fs_tree(arg);
@@ -1818,6 +1530,9 @@ static void shell_eval(char* line){
     else if(cmd_is(cmd,"fb") || cmd_is(cmd,"framebuffer")) fb_cmd(arg);
     else if(cmd_is(cmd,"kill")) cmd_kill(arg);
     else if(cmd_is(cmd,"loader") || cmd_is(cmd,"exec")) loader_cmd(arg);
+    else if(cmd_is(cmd,"trx")) loader_cmd(arg);
+    else if(cmd_is(cmd,"lang") || cmd_is(cmd,"rusa")) lang_cmd(arg);
+    else if(cmd_is(cmd,"project") || cmd_is(cmd,"proj")) project_cmd(arg);
     else if(cmd_is(cmd,"object") || cmd_is(cmd,"obj")) object_cmd(arg);
     else if(cmd_is(cmd,"run")) {
         char* rest;
@@ -1871,7 +1586,10 @@ static void shell_eval(char* line){
 
 void kmain(uint32_t mb_magic, uint32_t mb_info_addr){
     console_init();
+    shell_session_init();
+    editor_init();
     fs_init();
+    block_init();
     process_init();
     process_set_compute("compute", "scientific", 90, 0);
     window_init();
@@ -1880,11 +1598,15 @@ void kmain(uint32_t mb_magic, uint32_t mb_info_addr){
     service_init();
     vfs_init();
     fd_init();
+    lang_init();
+    project_init();
     net_init();
     gui_init();
     fb_init();
     jobs_init();
     sched_init();
+    loader_set_call_handler(shell_eval);
+    shell_set_eval_handler(kernel_shell_dispatch);
     loader_init();
     gfx_init();
     taskman_init();
@@ -1920,54 +1642,40 @@ void kmain(uint32_t mb_magic, uint32_t mb_info_addr){
         int key = kb_read_key();
         if(key==0){ __asm__ __volatile__("hlt"); continue; }
 
-        if(editor_active && key == KB_KEY_UP){
+        if(editor_is_active() && key == KB_KEY_UP){
             editor_move(-1, &len);
             continue;
         }
-        if(editor_active && key == KB_KEY_DOWN){
+        if(editor_is_active() && key == KB_KEY_DOWN){
             editor_move(1, &len);
             continue;
         }
-        if(editor_active && key == KB_KEY_LEFT){
+        if(editor_is_active() && key == KB_KEY_LEFT){
             editor_move_horizontal(-1, &len);
             continue;
         }
-        if(editor_active && key == KB_KEY_RIGHT){
+        if(editor_is_active() && key == KB_KEY_RIGHT){
             editor_move_horizontal(1, &len);
             continue;
         }
         if(key == KB_KEY_LEFT){
-            if(input_cursor > 0)
-                input_cursor--;
+            if(shell_cursor() > 0)
+                shell_set_cursor(shell_cursor() - 1);
             redraw_input(&len);
             continue;
         }
         if(key == KB_KEY_RIGHT){
-            if(input_cursor < len)
-                input_cursor++;
+            if(shell_cursor() < len)
+                shell_set_cursor(shell_cursor() + 1);
             redraw_input(&len);
             continue;
         }
-        if(key == KB_KEY_UP && history_count > 0){
-            if(history_view < 0) history_view = (int)history_count - 1;
-            else if(history_view > 0) history_view--;
-            str_copy(inbuf, history[history_view], INBUF_MAX);
-            len = str_len(inbuf);
-            input_cursor = len;
-            redraw_input(&len);
+        if(key == KB_KEY_UP){
+            shell_history_prev(&len);
             continue;
         }
         if(key == KB_KEY_DOWN){
-            if(history_view >= 0 && history_view + 1 < (int)history_count){
-                history_view++;
-                str_copy(inbuf, history[history_view], INBUF_MAX);
-            } else {
-                history_view = -1;
-                inbuf[0] = 0;
-            }
-            len = str_len(inbuf);
-            input_cursor = len;
-            redraw_input(&len);
+            shell_history_next(&len);
             continue;
         }
         if(key > 0xFF)
@@ -1975,34 +1683,29 @@ void kmain(uint32_t mb_magic, uint32_t mb_info_addr){
 
         char c = (char)key;
         if(c == 27){
-            if(editor_active){
+            if(editor_is_active()){
                 console_input_clear();
                 editor_close();
             }
-            len = 0;
-            inbuf[0] = 0;
-            input_cursor = 0;
-            history_view = -1;
+            shell_reset_input(&len);
             prompt();
             continue;
         }
         if(c=='\n'){
+            char* inbuf = shell_input_buffer();
             inbuf[len]=0;
             console_input_clear();
             console_echo_command(inbuf);
-            if(!editor_active)
+            if(!editor_is_active())
                 history_add(inbuf);
-            history_view = -1;
-            if(editor_active){
+            if(editor_is_active()){
                 editor_eval(inbuf, &len);
-                if(editor_active)
+                if(editor_is_active())
                     continue;
             } else {
                 shell_eval(inbuf);
             }
-            len=0;
-            inbuf[0]=0;
-            input_cursor = 0;
+            shell_reset_input(&len);
             prompt();
             continue;
         }

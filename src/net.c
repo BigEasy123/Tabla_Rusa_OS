@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include "console.h"
 #include "events.h"
+#include "fd.h"
 #include "fs.h"
 #include "process.h"
 #include "service.h"
@@ -14,6 +15,7 @@ static int tcp_listen_port = 0;
 struct socket_entry {
     int used;
     int id;
+    int fd;
     const char* proto;
     const char* state;
     uint32_t local_port;
@@ -22,6 +24,7 @@ struct socket_entry {
 };
 
 static struct socket_entry sockets[SOCKET_MAX];
+static char fd_read_buffer[96];
 
 static char lower_char(char c){
     if(c >= 'A' && c <= 'Z') return (char)(c - 'A' + 'a');
@@ -69,12 +72,48 @@ void net_init(void){
         sockets[i].used = 0;
         sockets[i].id = i;
         sockets[i].rx[0] = 0;
+        sockets[i].fd = -1;
     }
     fs_write("/system/net/stack.txt",
         "layers=link,arp,ipv4,icmp,udp,tcp,sockets\n"
         "loopback=127.0.0.1/8\n"
         "socket_max=4\n");
     fs_append_line("/var/log/network.log", "net: loopback stack online");
+}
+
+int net_fd_write(int fd, const char* text){
+    for(int i=0; i<SOCKET_MAX; i++){
+        if(sockets[i].used && sockets[i].fd == fd){
+            size_t j = 0;
+            while(text[j] && j + 1 < sizeof(sockets[i].rx)){
+                sockets[i].rx[j] = text[j];
+                j++;
+            }
+            sockets[i].rx[j] = 0;
+            fs_append_line("/var/log/network.log", "net: fd socket write queued");
+            return 0;
+        }
+    }
+    return -1;
+}
+
+int net_fd_read(int fd, const char** out){
+    for(int i=0; i<SOCKET_MAX; i++){
+        if(sockets[i].used && sockets[i].fd == fd){
+            size_t j = 0;
+            const char* src = sockets[i].rx[0] ? sockets[i].rx : "<empty>";
+            while(src[j] && j + 1 < sizeof(fd_read_buffer)){
+                fd_read_buffer[j] = src[j];
+                j++;
+            }
+            fd_read_buffer[j++] = '\n';
+            fd_read_buffer[j] = 0;
+            sockets[i].rx[0] = 0;
+            *out = fd_read_buffer;
+            return 0;
+        }
+    }
+    return -1;
 }
 
 int net_is_link_up(void){
@@ -140,7 +179,7 @@ void net_cmd(char* arg){
         console_puts("routes:\n");
         console_puts("  127.0.0.0/8 dev lo\n");
         if(link_up) console_puts("  0.0.0.0/0 dev eth0 metric 100\n");
-    } else if(str_eq(action, "socket")){
+    } else if(str_eq(action, "socket") || str_eq(action, "open")){
         const char* proto = first_arg(rest, &rest);
         uint32_t port = parse_u32(rest);
         for(int i=0; i<SOCKET_MAX; i++){
@@ -150,9 +189,15 @@ void net_cmd(char* arg){
                 sockets[i].state = str_eq(proto, "udp") ? "OPEN" : "LISTEN";
                 sockets[i].local_port = port;
                 sockets[i].remote_port = 0;
+                char label[16] = "socket:0";
+                label[7] = (char)('0' + i);
+                sockets[i].fd = fd_open_socket(label);
                 sockets[i].rx[0] = 0;
                 console_puts("socket id=");
                 console_write_dec((uint32_t)i);
+                console_puts(" fd=");
+                if(sockets[i].fd >= 0) console_write_dec((uint32_t)sockets[i].fd);
+                else console_puts("none");
                 console_puts(" ");
                 console_puts(sockets[i].proto);
                 console_puts(" port=");
@@ -173,10 +218,24 @@ void net_cmd(char* arg){
                 console_puts(sockets[i].state);
                 console_puts(" local=");
                 console_write_dec(sockets[i].local_port);
+                console_puts(" fd=");
+                if(sockets[i].fd >= 0) console_write_dec((uint32_t)sockets[i].fd);
+                else console_puts("none");
                 console_puts(" rx=");
                 console_puts(sockets[i].rx);
                 console_putc('\n');
             }
+        }
+    } else if(str_eq(action, "fd")){
+        uint32_t id = parse_u32(first_arg(rest, &rest));
+        if(id >= SOCKET_MAX || !sockets[id].used) console_puts("fd: bad socket\n");
+        else {
+            console_puts("socket ");
+            console_write_dec(id);
+            console_puts(" fd=");
+            if(sockets[id].fd >= 0) console_write_dec((uint32_t)sockets[id].fd);
+            else console_puts("none");
+            console_putc('\n');
         }
     } else if(str_eq(action, "connect")){
         uint32_t id = parse_u32(first_arg(rest, &rest));
@@ -209,6 +268,6 @@ void net_cmd(char* arg){
             sockets[id].rx[0] = 0;
         }
     } else {
-        console_puts("usage: net status|up|down|ip|udp|tcp PORT|arp|route|socket tcp|udp PORT|sockets|connect ID PORT|send ID MSG|recv ID\n");
+        console_puts("usage: net status|up|down|ip|udp|tcp PORT|arp|route|open tcp|udp PORT|socket tcp|udp PORT|fd ID|sockets|connect ID PORT|send ID MSG|recv ID\n");
     }
 }

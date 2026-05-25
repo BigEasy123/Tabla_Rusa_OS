@@ -4,6 +4,7 @@
 #include "events.h"
 #include "fd.h"
 #include "fs.h"
+#include "net.h"
 #include "security.h"
 #include "vfs.h"
 
@@ -12,6 +13,8 @@
 struct fd_entry {
     int used;
     int id;
+    int owner_pid;
+    const char* type;
     char path[64];
     char mode[4];
     size_t offset;
@@ -89,11 +92,12 @@ void fd_init(void){
 }
 
 int fd_open(const char* path, const char* mode){
-    if(mode[0] != 'r' && !vfs_can_write(path))
+    int writable = fd_can_write_mode(mode);
+    if(writable && !vfs_can_write(path))
         return -2;
-    if(mode[0] != 'r' && !security_can_write(path))
+    if(writable && !security_can_write(path))
         return -3;
-    if(mode[0] == 'r'){
+    if(!writable){
         const char* text;
         if(fs_read(path, &text) != 0)
             return -1;
@@ -104,6 +108,8 @@ int fd_open(const char* path, const char* mode){
     for(size_t i=0; i<FD_MAX; i++){
         if(!fds[i].used){
             fds[i].used = 1;
+            fds[i].owner_pid = 1;
+            fds[i].type = "file";
             fds[i].offset = 0;
             str_copy(fds[i].path, path, sizeof(fds[i].path));
             str_copy(fds[i].mode, mode, sizeof(fds[i].mode));
@@ -111,6 +117,21 @@ int fd_open(const char* path, const char* mode){
         }
     }
     return -4;
+}
+
+int fd_open_socket(const char* label){
+    for(size_t i=0; i<FD_MAX; i++){
+        if(!fds[i].used){
+            fds[i].used = 1;
+            fds[i].owner_pid = 4;
+            fds[i].type = "socket";
+            fds[i].offset = 0;
+            str_copy(fds[i].path, label, sizeof(fds[i].path));
+            str_copy(fds[i].mode, "rw", sizeof(fds[i].mode));
+            return fds[i].id;
+        }
+    }
+    return -1;
 }
 
 int fd_close(int fd){
@@ -123,12 +144,16 @@ int fd_close(int fd){
 int fd_read(int fd, const char** out){
     struct fd_entry* entry = fd_find(fd);
     if(!entry) return -1;
+    if(str_eq(entry->type, "socket"))
+        return net_fd_read(fd, out);
     return fs_read(entry->path, out);
 }
 
 int fd_write(int fd, const char* text){
     struct fd_entry* entry = fd_find(fd);
     if(!entry || !fd_can_write_mode(entry->mode)) return -1;
+    if(str_eq(entry->type, "socket"))
+        return net_fd_write(fd, text);
     if(!vfs_can_write(entry->path) || !security_can_write(entry->path)) return -2;
     events_emit("fs.write");
     return fs_write(entry->path, text);
@@ -142,6 +167,10 @@ void fd_cmd(char* arg){
             if(fds[i].used){
                 console_puts("fd ");
                 console_write_dec((uint32_t)fds[i].id);
+                console_puts(" ");
+                console_puts(fds[i].type);
+                console_puts(" owner=");
+                console_write_dec((uint32_t)fds[i].owner_pid);
                 console_puts(" ");
                 console_puts(fds[i].mode);
                 console_puts(" ");
