@@ -93,13 +93,20 @@ void console_input_clear(void){
 }
 
 void console_input_write(const char* s){
+    size_t col = 0;
+    while(col < VGA_W && s[col])
+        col++;
+    console_input_write_at(s, col);
+}
+
+void console_input_write_at(const char* s, size_t cursor_col){
     console_input_clear();
     size_t col = 0;
     while(col < VGA_W && s[col]){
         VGA_MEM[VGA_INPUT_ROW*VGA_W+col] = ((uint16_t)input_color<<8) | (uint8_t)s[col];
         col++;
     }
-    cursor_set(VGA_INPUT_ROW, col < VGA_W ? col : VGA_W - 1);
+    cursor_set(VGA_INPUT_ROW, cursor_col < VGA_W ? cursor_col : VGA_W - 1);
 }
 
 void console_putc(char c){

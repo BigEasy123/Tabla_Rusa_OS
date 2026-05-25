@@ -1,8 +1,9 @@
 #include "fs.h"
 #include "console.h"
+#include <stdint.h>
 
-#define FS_MAX_NODES 48
-#define FS_NAME_MAX 16
+#define FS_MAX_NODES 128
+#define FS_NAME_MAX 32
 #define FS_CONTENT_MAX 1024
 
 enum fs_type {
@@ -155,8 +156,74 @@ void fs_init(void){
     nodes[0].name[0] = 0;
     cwd = 0;
     fs_mkdir("/home");
+    fs_mkdir("/home/docs");
+    fs_mkdir("/home/math");
+    fs_mkdir("/home/projects");
+    fs_mkdir("/home/downloads");
     fs_mkdir("/bin");
-    fs_write("/home/readme.txt", "Welcome to Tabla Rusa OS.\nTry: ls, cat readme.txt, edit notes.txt\n");
+    fs_mkdir("/boot");
+    fs_mkdir("/config");
+    fs_mkdir("/dev");
+    fs_mkdir("/lib");
+    fs_mkdir("/mnt");
+    fs_mkdir("/pkg");
+    fs_mkdir("/proc");
+    fs_mkdir("/services");
+    fs_mkdir("/share");
+    fs_mkdir("/share/docs");
+    fs_mkdir("/system");
+    fs_mkdir("/system/gui");
+    fs_mkdir("/system/net");
+    fs_mkdir("/system/security");
+    fs_mkdir("/tmp");
+    fs_mkdir("/users");
+    fs_mkdir("/users/root");
+    fs_mkdir("/var");
+    fs_mkdir("/var/log");
+    fs_write("/home/readme.txt",
+        "Welcome to Tabla Rusa OS.\n"
+        "Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.\n"
+        "Try: pkg list, pkg info editor, package[\"editor\"].install()\n"
+        "Explore: cd /system, cd /var/log, gui status, net status, security status\n"
+        "Native forms: inspect memory, file[\"readme.txt\"].read(), spawn editor notes.txt\n");
+    fs_write("/boot/kernel.cfg", "kernel=tabla-rusa\narch=i386\nruntime=tabla:0.1\n");
+    fs_write("/config/system.conf", "hostname=tabla\nsecure_mode=on\ngui=planned\nnetwork=loopback\n");
+    fs_write("/dev/keyboard", "device=ps2-keyboard\nstate=active\n");
+    fs_write("/dev/console", "device=vga-text-console\nstate=active\n");
+    fs_write("/proc/version", "Tabla Rusa OS 0.0.5 i386 tabla:0.1\n");
+    fs_write("/proc/mounts", "ramfs / rw\nprocfs /proc ro\nsysfs /system ro\npkgfs /pkg rw\n");
+    fs_write("/system/gui/README", "GUI foundation: compositor, windows, themes, events.\n");
+    fs_write("/system/net/README", "Network foundation: device, IP, ARP, TCP, UDP layers.\n");
+    fs_write("/system/security/README", "Security foundation: rings, capabilities, audit log, policy.\n");
+    fs_write("/share/docs/fs-stack.txt", "VFS -> ramfs now; planned: devfs, procfs, pkgfs, persistent diskfs.\n");
+    fs_write("/share/docs/tcpip-stack.txt", "TCP/IP scaffold: link, IPv4, ARP, ICMP, UDP, TCP sockets.\n");
+    fs_write("/share/docs/gui-roadmap.txt", "GUI scaffold: framebuffer, compositor, window objects, input events.\n");
+    fs_write("/share/docs/native-objects.txt", "Objects: file, dir, mount, process, service, window, package.\n");
+    fs_write("/share/docs/scientific-scheduling.txt",
+        "Tabla process table tracks priority, cpu_hint, workload class, and ticks.\n"
+        "Use compute status, compute vector, compute bench, and process[\"compute\"].trace().\n");
+    fs_write("/share/docs/math-kernel.txt",
+        "Tabla math kernel commands:\n"
+        "math vec dot 1 2 3 | 4 5 6\n"
+        "math vec add 1 2 | 10 20\n"
+        "math mat det2 1 2 3 4\n"
+        "math mat det3 1 0 0 0 1 0 0 0 1\n"
+        "math num gcd 84 30, math num modpow 2 10 17, math num prime 97\n"
+        "math group cyclic 5, math group units 12, math stats 1 2 3 4\n"
+        "math object vector a 1 2 3, math object matrix A 1 2 3 4\n"
+        "math rat add 1/3 1/6, math mat inv2 1 2 3 4, math modmat inv2 11 1 2 3 4\n"
+        "math sym diff 1 0 -1, math object save A /home/math/A.obj\n"
+        "math job submit vec dot 1 2 | 3 4, math job run 1\n"
+        "math latex vec 1 2 3, math latex mat2 1 2 3 4\n"
+        "All math commands mark the compute process with a workload class and ticks.\n");
+    fs_write("/services/logger", "state=running\nprovides=audit and system logs\n");
+    fs_write("/services/network", "state=stopped\nprovides=TCP/IP stack foundation\n");
+    fs_write("/services/gui", "state=stopped\nprovides=window compositor foundation\n");
+    fs_write("/users/root/profile", "user=root\ncaps=all\n");
+    fs_write("/users/guest.profile", "user=guest\ncaps=fs.read,shell.run\n");
+    fs_write("/var/log/system.log", "boot: ram filesystem initialized\n");
+    fs_write("/var/log/security.log", "security: policy loaded secure_mode=on\n");
+    fs_write("/var/log/network.log", "net: loopback initialized tcp_state=closed\n");
     fs_cd("/home");
 }
 
@@ -233,6 +300,31 @@ int fs_cd(const char* path){
     return 0;
 }
 
+int fs_stat(const char* path, int* type, size_t* size){
+    int id = resolve(path);
+    if(id < 0)
+        return -1;
+    if(type)
+        *type = nodes[id].type == FS_DIR ? 1 : 2;
+    if(size)
+        *size = nodes[id].type == FS_FILE ? nodes[id].size : 0;
+    return 0;
+}
+
+int fs_copy(const char* src, const char* dst){
+    int id = resolve(src);
+    if(id < 0 || nodes[id].type != FS_FILE)
+        return -1;
+    return fs_write(dst, nodes[id].content);
+}
+
+int fs_move(const char* src, const char* dst){
+    int r = fs_copy(src, dst);
+    if(r != 0)
+        return r;
+    return fs_rm(src);
+}
+
 void fs_pwd(char* out, size_t max){
     char tmp[96];
     size_t len = 0;
@@ -273,4 +365,38 @@ void fs_ls(const char* path){
             console_putc('\n');
         }
     }
+}
+
+static void tree_indent(int depth){
+    for(int i=0; i<depth; i++)
+        console_puts("  ");
+}
+
+static void tree_node(int id, int depth){
+    tree_indent(depth);
+    console_puts(nodes[id].type == FS_DIR ? "[d] " : "[f] ");
+    if(id == 0)
+        console_puts("/");
+    else
+        console_puts(nodes[id].name);
+    if(nodes[id].type == FS_FILE){
+        console_puts(" ");
+        console_write_dec((uint32_t)nodes[id].size);
+        console_puts("B");
+    }
+    console_putc('\n');
+    if(nodes[id].type != FS_DIR)
+        return;
+    for(int i=0; i<FS_MAX_NODES; i++)
+        if(nodes[i].type != FS_UNUSED && nodes[i].parent == id && i != id)
+            tree_node(i, depth + 1);
+}
+
+void fs_tree(const char* path){
+    int id = (path && path[0]) ? resolve(path) : cwd;
+    if(id < 0){
+        console_puts("tree: not found\n");
+        return;
+    }
+    tree_node(id, 0);
 }
