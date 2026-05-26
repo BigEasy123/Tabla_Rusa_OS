@@ -2,7 +2,7 @@
 
 This file is the living feature ledger for Tabla Rusa OS. Update it after each development prompt.
 
-Last updated: after `.rusa` source files, multi-line Rusa tools, project workspace, package hooks, socket FD I/O, and framebuffer dump pass.
+Last updated: after the Rusa 0.2 source parser/runtime pass with variables, typed values, expressions, functions, loops, imports, and persistent source event handlers.
 
 ## Current Kernel Shape
 
@@ -15,6 +15,14 @@ Last updated: after `.rusa` source files, multi-line Rusa tools, project workspa
 - Unified shell/programming syntax for commands and native object expressions.
 - The native language is named **Rusa**.
 - User-authored Rusa source files use the `.rusa` extension.
+- Rusa source now has its own parser/evaluator separate from TRX bytecode.
+- Variables support `let` and `set`, with typed value annotations for `int`, `bool`, and `string`.
+- Expressions support literals, variables, arithmetic, comparisons, parentheses, booleans, strings, and function calls.
+- Block syntax uses braces, keeping the language readable without indentation dependency.
+- Functions support parameters, optional parameter type annotations, `return`, and `call`.
+- Loops support `while` and `repeat`; `if`/`else` and `parallel { ... }` blocks are parsed.
+- `import std` loads reusable source from `/lib/rusa/std.rusa`.
+- `on "trigger" { ... }` registers persistent Rusa source event handlers with the OS event bus.
 - Command history, cursor-aware input editing, and an editor prompt.
 - Shell input/session state lives in `shell.c`.
 - Native forms include `inspect memory`, `spawn editor`, and object expressions such as `file["/home/a"].read()`.
@@ -40,13 +48,39 @@ lang keywords
 lang examples
 lang std
 lang import std
+lang run /home/projects/demo.rusa
+lang eval fn inc(x: int) { return x + 1 } print inc(4)
 lang object file
 ```
 
 Rusa keywords currently documented in `/share/rusa/keywords`:
 
 ```text
-inspect spawn on if else parallel run file process service window program math phys
+import let set fn return if else while repeat parallel on run call print true false
+file process service window program math phys
+```
+
+Example Rusa source:
+
+```text
+import std
+
+let count: int = 0
+
+fn hello(name: string) {
+  print "hello " + name
+}
+
+while count < 2 {
+  call hello("rusa")
+  set count = count + 1
+}
+
+on "fs.write" {
+  print "filesystem changed"
+}
+
+file["/home/readme.txt"].read()
 ```
 
 ## Editor
@@ -105,8 +139,10 @@ write /system/nope.txt blocked
 - `/bin/*.trx` files now contain a `bytecode:` section, and the loader executes bytecode from file content before falling back to built-in defaults.
 - User TRX helpers exist through `loader new NAME`, `loader write NAME LINE`, and `run NAME`.
 - User programs are saved as `/home/projects/NAME.rusa`.
+- `.rusa` files without a `bytecode:` section execute through the Rusa source parser.
 - Multi-line source editing helpers exist through `trx append/show/clear/edit`.
 - `CALL` bridges bytecode into shell commands, so TRX programs can invoke existing OS services.
+- TRX `HALT` now stops bytecode execution instead of only printing a halt line.
 - Remaining work: richer TRX instruction set, bytecode files loaded from fs content, and eventually ELF loading.
 
 Examples:
@@ -285,7 +321,8 @@ taskman top
 
 - `/home/projects` is the Rusa source workspace.
 - `project new NAME` creates `/home/projects/NAME.rusa` and `/home/projects/NAME.md`.
-- `project run NAME` executes the `.rusa` source through the loader.
+- `project new NAME` now writes a real Rusa source template using `import`, `let`, `fn`, `while`, and `call`.
+- `project run NAME` executes the `.rusa` source through the loader and Rusa parser.
 - `project docs NAME` prints the project notes.
 
 Examples:
@@ -294,9 +331,8 @@ Examples:
 project new orbit
 project list
 project docs orbit
-trx append orbit CALL math phys orbit 10 5
-project run orbit
 project edit orbit
+project run orbit
 ```
 
 ## Useful Smoke Test Commands
@@ -332,6 +368,9 @@ scheduler yield
 framebuffer/vector/network descriptors
 block device descriptor
 Rusa docs and stdlib
+Rusa source stdlib
+Rusa source runtime
+Rusa persistent events
 Rusa object docs
 security mode
 ```
@@ -341,5 +380,5 @@ Some graphical commands such as `gui start` and `gfx scene` intentionally redraw
 Latest QEMU selftest result:
 
 ```text
-selftest pass=28 fail=0
+selftest pass=31 fail=0
 ```

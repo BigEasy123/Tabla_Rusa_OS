@@ -1,6 +1,7 @@
 #include <stddef.h>
 #include "console.h"
 #include "block.h"
+#include "events.h"
 #include "fb.h"
 #include "fd.h"
 #include "fs.h"
@@ -74,6 +75,10 @@ void tests_cmd(void){
     check_result("block descriptor", fs_stat("/system/block.txt", &type, &size) == 0);
     check_result("Rusa docs", fs_stat("/share/rusa/keywords", &type, &size) == 0);
     check_result("Rusa stdlib", fs_stat("/lib/rusa/std.trx", &type, &size) == 0);
+    check_result("Rusa source stdlib", fs_stat("/lib/rusa/std.rusa", &type, &size) == 0);
+    check_result("Rusa source runtime", lang_run_source("let n: int = 1\nwhile n < 3 { set n = n + 1 }\nfn plus(a: int) { return a + 1 }\nprint plus(n)\n", "<selftest>", "") == 0);
+    check_result("Rusa persistent events", lang_run_source("on \"selftest.event\" { print \"event-ok\" }\n", "<selftest-event>", "") == 0);
+    events_emit("selftest.event");
     check_result("Rusa object docs", fs_stat("/share/rusa/objects", &type, &size) == 0);
     console_puts("security user=");
     console_puts(security_current_user());

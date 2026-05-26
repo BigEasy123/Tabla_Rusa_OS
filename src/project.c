@@ -65,9 +65,15 @@ void project_cmd(char* arg){
         project_path(name, ".rusa", src, sizeof(src));
         project_path(name, ".md", docs, sizeof(docs));
         fs_write(src,
-            "name=project\nkind=rusa-source\nentry=bytecode\nabi=rusa:0.1\nformat=TRX1\nbytecode:\n"
-            "PRINT hello-from-project\n"
-            "HALT\n");
+            "import std\n"
+            "let count: int = 0\n"
+            "fn hello(name: string) {\n"
+            "  print \"hello \" + name\n"
+            "}\n"
+            "while count < 2 {\n"
+            "  call hello(\"rusa\")\n"
+            "  set count = count + 1\n"
+            "}\n");
         size_t pos = 0;
         const char* parts[] = {"# ", name, "\n\nRusa project workspace.\nRun with: project run ", name, "\n", 0};
         for(size_t p=0; parts[p]; p++)

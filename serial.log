@@ -18,7 +18,7 @@ Ready.
 tr:/home $ test
 Tabla Rusa OS selftest
 [ok]   console
-timer: ticks=598
+timer: ticks=403
 memory: entries=6 usable_kib=130559
 [ok]   paging enabled
 [ok]   fs /home
@@ -52,16 +52,21 @@ fb mode=640x480x32 surfaces=3 pixels=0 rects=0 mouse=32,24
 [ok]   block descriptor
 [ok]   Rusa docs
 [ok]   Rusa stdlib
+[ok]   Rusa source stdlib
+rusa <selftest>
+[ok]   Rusa source runtime
+rusa <selftest-event>
+[ok]   Rusa persistent events
+event rusa-ev-8 -> rusa handler
+rusa <event>
+event-ok
 [ok]   Rusa object docs
 security user=root secure_mode=on
-selftest pass=28 fail=0
-tr:/home $ project new orbit
-project created orbit
-tr:/home $ trx append orbit CALL math phys orbit 10 5
-appended /home/projects/orbit.rusa
-tr:/home $ project run orbit
-exec /home/projects/orbit.rusa kind=trx-file
-entry: bytecode
-hello-from-project
-trx halt
-orbital_v2_scaled=1334
+selftest pass=31 fail=0
+tr:/home $ project new demo
+project created demo
+tr:/home $ project run demo
+rusa /home/projects/demo.rusa
+rusa /lib/rusa/std.rusa
+hello rusa
+hello rusa

@@ -1606,6 +1606,7 @@ void kmain(uint32_t mb_magic, uint32_t mb_info_addr){
     jobs_init();
     sched_init();
     loader_set_call_handler(shell_eval);
+    lang_set_call_handler(shell_eval);
     shell_set_eval_handler(kernel_shell_dispatch);
     loader_init();
     gfx_init();

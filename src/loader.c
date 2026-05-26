@@ -3,6 +3,7 @@
 #include "console.h"
 #include "fs.h"
 #include "jobs.h"
+#include "lang.h"
 #include "loader.h"
 #include "process.h"
 
@@ -159,10 +160,10 @@ void loader_set_call_handler(void (*handler)(char* command)){
     call_handler = handler;
 }
 
-static void trx_run_line(char* line){
+static int trx_run_line(char* line){
     char* rest;
     const char* op = first_arg(line, &rest);
-    if(op[0] == 0) return;
+    if(op[0] == 0) return 0;
     if(str_eq(op, "PRINT")){
         console_puts(rest);
         console_putc('\n');
@@ -190,11 +191,13 @@ static void trx_run_line(char* line){
         jobs_account("program-loader", ticks);
     } else if(str_eq(op, "HALT")){
         console_puts("trx halt\n");
+        return 1;
     } else {
         console_puts("trx: unknown opcode ");
         console_puts(op);
         console_putc('\n');
     }
+    return 0;
 }
 
 static void trx_run(const char* code){
@@ -203,7 +206,7 @@ static void trx_run(const char* code){
     for(size_t i=0; code[i]; i++){
         if(code[i] == '\n' || pos + 1 >= sizeof(buf)){
             buf[pos] = 0;
-            trx_run_line(buf);
+            if(trx_run_line(buf)) return;
             pos = 0;
         } else {
             buf[pos++] = code[i];
@@ -238,6 +241,8 @@ int loader_run(const char* path, const char* args){
         bytecode = find_bytecode_section(file_text);
     if(!bytecode && prog)
         bytecode = prog->bytecode;
+    if(!bytecode && file_text)
+        return lang_run_source(file_text, run_path, args);
     if(!bytecode)
         return -1;
     process_set_running("compute", 1);
