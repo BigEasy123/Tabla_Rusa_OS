@@ -15,58 +15,529 @@ pic ok
 timer ok
 keyboard ok
 Ready.
-tr:/home $ test
-Tabla Rusa OS selftest
-[ok]   console
-timer: ticks=403
-memory: entries=6 usable_kib=130559
-[ok]   paging enabled
-[ok]   fs /home
-[ok]   fs /home/math
-[ok]   fs write/read
-[ok]   fd open
+tr:/home $ help
+Commands:
+  help        - show this help
+  echo ARG    - print ARG
+  pwd, ls, cd - navigate RAM filesystem
+  whoami      - print current user
+  uname       - print kernel/platform identity
+  history     - show recent shell commands
+  cat FILE    - print a file
+  block ARGS  - block device: status/read/write/save/load
+  fd ARGS     - file descriptors: open/read/write/close/list
+  cp/mv/stat/tree - inspect and move filesystem objects
+  touch FILE  - create an empty file
+  write F TXT - replace file contents
+  mkdir DIR   - create a directory
+  rm PATH     - remove empty dir or file
+  edit FILE   - open numbered line editor; Up/Down move, Esc exits
+  cls         - clear screen
+  about       - kernel info
+  fault       - test exception handler
+  ticks       - show PIT ticks
+  uptime      - show uptime seconds
+  sleep N     - sleep N ticks
+  mem         - show memory summary
+  mmap        - print memory map
+  heap        - show heap state
+  alloc N     - bump-allocate N bytes
+  paging      - show paging state
+  mounts      - show filesystem stack mounts
+  gui ARGS    - GUI: status/start/desktop/tab/focus/move/windows
+  window ARGS - window objects: list/focus/move/info
+  ps, kill P  - process table and stop process
+  compute A   - scientific scheduler profile/status/bench
+  math TOPIC  - linear algebra, number theory, groups, stats
+  gfx ARGS    - vector graphics: line/rect/circle/scene
+  fb ARGS     - framebuffer: status/mode/surface/mouse/blit
+  job ARGS    - generic OS job scheduler: list/run/priority
+  sched ARGS  - cooperative scheduler: list/yield/wake/sleep/quantum
+  taskman A   - task manager: top/ps/jobs/services/kill/boost
+  loader A    - executable loader: list/info/run
+  lang A      - Rusa language docs: about/keywords/examples/docs
+  object A    - unified native object dispatcher
+  service A   - service manager: list/start/stop/restart/status
+  user/cap A  - users and capabilities
+  event A     - reactive event rules
+  net ARGS    - network stack: status/up/down/ip/udp/tcp
+  security A  - security: status/audit/lock/unlock
+  structure   - show current OS subsystem layout
+  log ARGS    - logs: show/write/clear system|security|network
+  regs        - show basic CPU flags
+  test        - run safe command checks
+  pkg ARGS    - package registry: list/info/install/remove/compat
+  project A   - Rusa projects: list/new/run/docs/edit
+  halt        - stop CPU
+  reboot      - keyboard-controller reboot
+Native language forms:
+  inspect memory|heap|paging|processes|filesystem|gui|security|network
+  file["PATH"].read() / exists() / write("TEXT") / append("TEXT")
+  process["shell"].trace() / process["editor"].restart()
+  service["network"].start() / window["shell"].focus()
+  user["guest"].login() / event["net-audit"].emit()
+  package["editor"].install() / info() / remove()
+  spawn editor [FILE]
+tr:/home $ ls
+[d] docs
+[d] math
+[d] projects
+[d] downloads
+[f] readme.txt
+tr:/home $ cat readme.txt
+Welcome to Tabla Rusa OS.
+Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+Try: pkg list, pkg info editor, package["editor"].install()
+Explore: cd /system, cd /var/log, gui status, net status, security status
+Native forms: inspect memory, file["readme.txt"].read(), spawn editor notes.txt
+tr:/home $ edit readme.txt
 event fs-audit -> log filesystem mutation
-[ok]   fd write
-[ok]   fd read
-[ok]   fd close
-[ok]   process compute
-[ok]   program /bin/hello.trx
-[ok]   program /bin/mathbench.trx
-[ok]   program /bin/gui.trx
-[ok]   program /bin/netup.trx
-[ok]   program /bin/physics.trx
-[ok]   program /bin/readme.trx
-[ok]   program /bin/paint.trx
-exec /bin/hello.trx kind=trx-bytecode
-entry: PRINT
-hello-from-trx
-[ok]   loader run hello
-true
-[ok]   object dispatcher
-[ok]   scheduler yield
-fb mode=640x480x32 surfaces=3 pixels=0 rects=0 mouse=32,24
-[ok]   framebuffer descriptor
-[ok]   vector gfx manifest
-[ok]   trx runtime docs
-[ok]   network stack descriptor
-[ok]   block descriptor
-[ok]   Rusa docs
-[ok]   Rusa stdlib
-[ok]   Rusa source stdlib
-rusa <selftest>
-[ok]   Rusa source runtime
-rusa <selftest-event>
-[ok]   Rusa persistent events
-event rusa-ev-8 -> rusa handler
-rusa <event>
-event-ok
-[ok]   Rusa object docs
-security user=root secure_mode=on
-selftest pass=31 fail=0
-tr:/home $ project new demo
-project created demo
-tr:/home $ project run demo
-rusa /home/projects/demo.rusa
-rusa /lib/rusa/std.rusa
-hello rusa
-hello rusa
+event editor-focus -> window editor focus
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+> 06 | 
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+> 06 | 
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+> 05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+> 04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+> 03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+> 02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+> 03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+> 04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+> 05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+> 06 | 
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+> 06 | 
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+> 06 | 
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+> 05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+> 04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+> 05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+> 06 | 
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+> 06 | 
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+> 06 | 
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+> 05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+> 04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+> 03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+> 02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+> 01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+> 01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+> 02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+> 03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+> 04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+> 05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+> 06 | 
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+> 06 | 
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+> 06 | 
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+> 06 | 
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+> 06 | 
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+> 05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+> 04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+> 03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+> 02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+> 01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+> 01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+> 02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+> 03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+> 04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+> 05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+> 06 | 
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+> 06 | 
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+> 06 | 
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+> 06 | 
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+> 06 | 
+edit> Hello
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+  06 | Hello
+> 07 | 
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+> 06 | Hello
+edit> Hello
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+  06 | Hello
+> 07 | 
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+> 06 | Hello
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+  06 | Hello
+> 07 | 
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+> 06 | Hello
+edit> 
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+  06 | 
+> 07 | 
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+  05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+> 06 | 
+Editing readme.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | Welcome to Tabla Rusa OS.
+  02 | Try: ls, cat readme.txt, edit notes.txt. Up/Down move lines; Esc exits.
+  03 | Try: pkg list, pkg info editor, package["editor"].install()
+  04 | Explore: cd /system, cd /var/log, gui status, net status, security stat
+> 05 | Native forms: inspect memory, file["readme.txt"].read(), spawn editor n
+  06 | 
+editor closed
+tr:/home $ ls
+[d] docs
+[d] math
+[d] projects
+[d] downloads
+[f] readme.txt
+tr:/home $ docs
+Unknown command: 'docs'. Type 'help'.
+tr:/home $ cd docs
+tr:/home/docs $ ls
+tr:/home/docs $ cd..
+Unknown command: 'cd..'. Type 'help'.
+tr:/home/docs $ cd
+tr:/home $ cd
