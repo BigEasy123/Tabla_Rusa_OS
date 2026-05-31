@@ -5,26 +5,41 @@
 #include "jobs.h"
 #include "process.h"
 #include "sched.h"
+#include "timer.h"
 
 #define SCHED_TASK_MAX 6
+#define SCHED_STACK_WORDS 64
+
+enum sched_state {
+    SCHED_READY,
+    SCHED_RUNNING,
+    SCHED_SLEEPING,
+    SCHED_BLOCKED
+};
+
+struct sched_context {
+    uint32_t pc;
+    uint32_t sp;
+    uint32_t stack_base;
+    uint32_t stack_limit;
+    uint32_t budget;
+};
 
 struct sched_task {
     const char* name;
-    const char* state;
+    enum sched_state state;
     uint32_t quantum;
     uint32_t runs;
+    uint32_t ticks;
+    uint32_t wake_tick;
+    struct sched_context ctx;
+    void (*entry)(struct sched_task* task);
 };
 
-static struct sched_task tasks[SCHED_TASK_MAX] = {
-    {"shell", "ready", 4, 0},
-    {"logger", "ready", 2, 0},
-    {"network", "sleep", 2, 0},
-    {"gui", "sleep", 3, 0},
-    {"compute", "ready", 8, 0},
-    {"idle", "ready", 1, 0}
-};
-
+static uint32_t stacks[SCHED_TASK_MAX][SCHED_STACK_WORDS];
+static struct sched_task tasks[SCHED_TASK_MAX];
 static size_t current_task = 0;
+static uint32_t total_switches = 0;
 
 static char lower_char(char c){
     return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c;
@@ -66,73 +81,237 @@ static uint32_t parse_u32(const char* s){
     return value;
 }
 
+static const char* state_name(enum sched_state state){
+    if(state == SCHED_READY) return "ready";
+    if(state == SCHED_RUNNING) return "run";
+    if(state == SCHED_SLEEPING) return "sleep";
+    return "block";
+}
+
+static void task_shell(struct sched_task* task){
+    task->ctx.pc++;
+    jobs_account("interactive", 1);
+}
+
+static void task_logger(struct sched_task* task){
+    task->ctx.pc++;
+    jobs_account("io", 1);
+}
+
+static void task_network(struct sched_task* task){
+    task->ctx.pc++;
+    jobs_account("network", 1);
+}
+
+static void task_gui(struct sched_task* task){
+    task->ctx.pc++;
+    jobs_account("gui", 1);
+}
+
+static void task_compute(struct sched_task* task){
+    task->ctx.pc += 2;
+    jobs_account("scientific", task->quantum);
+}
+
+static void task_idle(struct sched_task* task){
+    task->ctx.pc++;
+    jobs_account("idle", 1);
+}
+
+static void task_setup(size_t id, const char* name, enum sched_state state,
+                       uint32_t quantum, void (*entry)(struct sched_task* task)){
+    tasks[id].name = name;
+    tasks[id].state = state;
+    tasks[id].quantum = quantum;
+    tasks[id].runs = 0;
+    tasks[id].ticks = 0;
+    tasks[id].wake_tick = 0;
+    tasks[id].ctx.pc = 0;
+    tasks[id].ctx.stack_base = (uint32_t)&stacks[id][SCHED_STACK_WORDS - 1];
+    tasks[id].ctx.stack_limit = (uint32_t)&stacks[id][0];
+    tasks[id].ctx.sp = tasks[id].ctx.stack_base;
+    tasks[id].ctx.budget = quantum;
+    tasks[id].entry = entry;
+}
+
+static struct sched_task* find_task(const char* name){
+    for(size_t i=0; i<SCHED_TASK_MAX; i++)
+        if(str_eq(tasks[i].name, name))
+            return &tasks[i];
+    return 0;
+}
+
 void sched_init(void){
-    fs_append_line("/var/log/system.log", "sched: cooperative run queue online");
+    task_setup(0, "shell", SCHED_READY, 4, task_shell);
+    task_setup(1, "logger", SCHED_READY, 2, task_logger);
+    task_setup(2, "network", SCHED_SLEEPING, 2, task_network);
+    task_setup(3, "gui", SCHED_SLEEPING, 3, task_gui);
+    task_setup(4, "compute", SCHED_READY, 8, task_compute);
+    task_setup(5, "idle", SCHED_READY, 1, task_idle);
+    current_task = 0;
+    total_switches = 0;
+    fs_append_line("/var/log/system.log", "sched: timer-driven task contexts online");
+}
+
+static void wake_due_tasks(void){
+    uint32_t now = timer_ticks();
+    for(size_t i=0; i<SCHED_TASK_MAX; i++){
+        if(tasks[i].state == SCHED_SLEEPING && tasks[i].wake_tick && now >= tasks[i].wake_tick){
+            tasks[i].wake_tick = 0;
+            tasks[i].state = SCHED_READY;
+            process_set_running(tasks[i].name, 1);
+        }
+    }
+}
+
+static void run_task(size_t id){
+    struct sched_task* task = &tasks[id];
+    task->state = SCHED_RUNNING;
+    task->runs++;
+    task->ticks += task->quantum;
+    task->ctx.budget = task->quantum;
+    total_switches++;
+    process_context_switch(task->name, timer_ticks());
+    process_tick(task->name, task->quantum);
+    jobs_account("scheduler", task->quantum);
+    if(task->entry)
+        task->entry(task);
+    if(task->state == SCHED_RUNNING)
+        task->state = SCHED_READY;
 }
 
 void sched_yield(void){
+    wake_due_tasks();
     for(size_t tries=0; tries<SCHED_TASK_MAX; tries++){
         current_task = (current_task + 1) % SCHED_TASK_MAX;
-        if(str_eq(tasks[current_task].state, "ready")){
-            tasks[current_task].runs++;
-            process_tick(tasks[current_task].name, tasks[current_task].quantum);
-            jobs_account("scheduler", tasks[current_task].quantum);
+        if(tasks[current_task].state == SCHED_READY){
+            run_task(current_task);
             return;
         }
     }
+}
+
+void sched_on_timer(void){
+    static uint32_t divisor = 0;
+    divisor++;
+    wake_due_tasks();
+    if(divisor < 10)
+        return;
+    divisor = 0;
+    sched_yield();
+}
+
+const char* sched_current_name(void){
+    return tasks[current_task].name;
+}
+
+uint32_t sched_total_switches(void){
+    return total_switches;
+}
+
+static void print_task(const struct sched_task* task, size_t id){
+    console_puts(id == current_task ? "* " : "  ");
+    console_puts(task->name);
+    console_puts(" state=");
+    console_puts(state_name(task->state));
+    console_puts(" quantum=");
+    console_write_dec(task->quantum);
+    console_puts(" runs=");
+    console_write_dec(task->runs);
+    console_puts(" pc=");
+    console_write_dec(task->ctx.pc);
+    console_puts(" sp=");
+    console_write_hex(task->ctx.sp);
+    console_putc('\n');
 }
 
 void sched_cmd(char* arg){
     char* rest;
     const char* action = first_arg(arg, &rest);
     if(action[0] == 0 || str_eq(action, "list")){
-        for(size_t i=0; i<SCHED_TASK_MAX; i++){
-            console_puts(i == current_task ? "* " : "  ");
-            console_puts(tasks[i].name);
-            console_puts(" state=");
-            console_puts(tasks[i].state);
-            console_puts(" quantum=");
-            console_write_dec(tasks[i].quantum);
-            console_puts(" runs=");
-            console_write_dec(tasks[i].runs);
-            console_putc('\n');
-        }
-    } else if(str_eq(action, "yield") || str_eq(action, "tick")){
+        console_puts("switches=");
+        console_write_dec(total_switches);
+        console_puts(" current=");
+        console_puts(tasks[current_task].name);
+        console_putc('\n');
+        for(size_t i=0; i<SCHED_TASK_MAX; i++)
+            print_task(&tasks[i], i);
+    } else if(str_eq(action, "yield") || str_eq(action, "tick") || str_eq(action, "step")){
         sched_yield();
         console_puts("scheduler: ran ");
         console_puts(tasks[current_task].name);
         console_putc('\n');
+    } else if(str_eq(action, "run")){
+        uint32_t count = parse_u32(rest);
+        if(count == 0) count = 1;
+        while(count--)
+            sched_yield();
+        console_puts("scheduler: switches=");
+        console_write_dec(total_switches);
+        console_putc('\n');
     } else if(str_eq(action, "wake")){
         const char* name = first_arg(rest, &rest);
-        for(size_t i=0; i<SCHED_TASK_MAX; i++)
-            if(str_eq(tasks[i].name, name)){
-                tasks[i].state = "ready";
-                process_set_running(name, 1);
-                console_puts("scheduler: woke task\n");
-                return;
-            }
+        struct sched_task* task = find_task(name);
+        if(task){
+            task->state = SCHED_READY;
+            task->wake_tick = 0;
+            process_set_running(name, 1);
+            console_puts("scheduler: woke task\n");
+            return;
+        }
         console_puts("scheduler: task not found\n");
     } else if(str_eq(action, "sleep")){
         const char* name = first_arg(rest, &rest);
-        for(size_t i=0; i<SCHED_TASK_MAX; i++)
-            if(str_eq(tasks[i].name, name)){
-                tasks[i].state = "sleep";
-                process_set_running(name, 0);
-                console_puts("scheduler: slept task\n");
-                return;
-            }
+        struct sched_task* task = find_task(name);
+        uint32_t ticks = parse_u32(rest);
+        if(task){
+            task->state = SCHED_SLEEPING;
+            task->wake_tick = ticks ? timer_ticks() + ticks : 0;
+            process_set_running(name, 0);
+            console_puts("scheduler: slept task\n");
+            return;
+        }
+        console_puts("scheduler: task not found\n");
+    } else if(str_eq(action, "block")){
+        const char* name = first_arg(rest, &rest);
+        struct sched_task* task = find_task(name);
+        if(task){
+            task->state = SCHED_BLOCKED;
+            process_set_running(name, 0);
+            console_puts("scheduler: blocked task\n");
+            return;
+        }
         console_puts("scheduler: task not found\n");
     } else if(str_eq(action, "quantum")){
         const char* name = first_arg(rest, &rest);
         uint32_t q = parse_u32(rest);
-        for(size_t i=0; i<SCHED_TASK_MAX; i++)
-            if(str_eq(tasks[i].name, name)){
-                tasks[i].quantum = q;
-                console_puts("scheduler: quantum set\n");
-                return;
-            }
+        struct sched_task* task = find_task(name);
+        if(task){
+            task->quantum = q ? q : 1;
+            console_puts("scheduler: quantum set\n");
+            return;
+        }
+        console_puts("scheduler: task not found\n");
+    } else if(str_eq(action, "trace")){
+        const char* name = first_arg(rest, &rest);
+        struct sched_task* task = find_task(name);
+        if(task){
+            console_puts(task->name);
+            console_puts(" pc=");
+            console_write_dec(task->ctx.pc);
+            console_puts(" sp=");
+            console_write_hex(task->ctx.sp);
+            console_puts(" stack=");
+            console_write_hex(task->ctx.stack_limit);
+            console_puts("..");
+            console_write_hex(task->ctx.stack_base);
+            console_puts(" wake=");
+            console_write_dec(task->wake_tick);
+            console_putc('\n');
+            return;
+        }
         console_puts("scheduler: task not found\n");
     } else {
-        console_puts("usage: sched list | yield | wake NAME | sleep NAME | quantum NAME N\n");
+        console_puts("usage: sched list | yield | run N | wake NAME | sleep NAME [TICKS] | block NAME | quantum NAME N | trace NAME\n");
     }
 }

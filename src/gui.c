@@ -1,6 +1,8 @@
 #include <stdint.h>
 #include "console.h"
+#include "fb.h"
 #include "fs.h"
+#include "mouse.h"
 #include "process.h"
 #include "service.h"
 #include "window.h"
@@ -51,6 +53,17 @@ static uint32_t parse_u32(const char* s){
 
 static void gui_draw_desktop(void){
     const struct window_info* focused = window_focused();
+    fb_clear(10);
+    fb_fill_rect(0, 0, 640, 34, 170);
+    fb_fill_rect(24, 70, 280, 170, 55);
+    fb_fill_rect(328, 70, 288, 170, 80);
+    fb_fill_rect(24, 270, 280, 132, 65);
+    fb_fill_rect(328, 270, 288, 132, 95);
+    fb_draw_text(28, 12, "Tabla Rusa GUI", 240);
+    fb_draw_text(44, 96, "shell", 220);
+    fb_draw_text(350, 96, "inspector", 230);
+    fb_draw_text(44, 296, "editor", 210);
+    fb_draw_text(350, 296, "network", 210);
     console_clear_output();
     console_puts("+------------------------------------------------------------------------------+\n");
     console_puts("| Tabla Rusa GUI :: vga-text compositor                  tabs: shell editor net |\n");
@@ -90,8 +103,15 @@ void gui_cmd(char* arg){
     if(action[0] == 0 || str_eq(action, "status")){
         console_puts("gui=");
         console_puts(running ? "running" : "stopped");
-        console_puts(" backend=vga-text next=framebuffer\n");
-        console_puts("objects: compositor window-manager tab-strip input-router desktop\n");
+        console_puts(" backend=soft-framebuffer+vga-text\n");
+        console_puts("objects: compositor window-manager tab-strip input-router desktop screensaver\n");
+        console_puts("crosshair=");
+        console_write_dec(mouse_x());
+        console_putc(',');
+        console_write_dec(mouse_y());
+        console_puts(" buttons=");
+        console_write_dec(mouse_buttons());
+        console_putc('\n');
     } else if(str_eq(action, "start")){
         running = 1;
         service_set_running("gui", 1);
@@ -132,7 +152,14 @@ void gui_cmd(char* arg){
         }
         window_move(name, (int)x, (int)y);
         gui_draw_desktop();
+    } else if(str_eq(action, "click")){
+        uint32_t x = parse_u32(first_arg(rest, &rest));
+        uint32_t y = parse_u32(first_arg(rest, &rest));
+        mouse_set((int)x, (int)y);
+        mouse_button(0, 1);
+        mouse_button(0, 0);
+        gui_draw_desktop();
     } else {
-        console_puts("usage: gui status | start | stop | desktop | windows | tab | focus NAME | move NAME X Y\n");
+        console_puts("usage: gui status | start | stop | desktop | windows | tab | focus NAME | move NAME X Y | click X Y\n");
     }
 }

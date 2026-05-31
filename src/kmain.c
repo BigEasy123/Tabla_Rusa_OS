@@ -17,9 +17,11 @@
 #include "loader.h"
 #include "mathlib.h"
 #include "memory.h"
+#include "mouse.h"
 #include "net.h"
 #include "object.h"
 #include "paging.h"
+#include "privacy.h"
 #include "process.h"
 #include "project.h"
 #include "security.h"
@@ -1528,6 +1530,7 @@ static void kernel_shell_dispatch(char* line){
     else if(cmd_is(cmd,"math")) math_cmd(arg);
     else if(cmd_is(cmd,"gfx") || cmd_is(cmd,"vector")) gfx_cmd(arg);
     else if(cmd_is(cmd,"fb") || cmd_is(cmd,"framebuffer")) fb_cmd(arg);
+    else if(cmd_is(cmd,"mouse") || cmd_is(cmd,"pointer")) mouse_cmd(arg);
     else if(cmd_is(cmd,"kill")) cmd_kill(arg);
     else if(cmd_is(cmd,"loader") || cmd_is(cmd,"exec")) loader_cmd(arg);
     else if(cmd_is(cmd,"trx")) loader_cmd(arg);
@@ -1545,6 +1548,7 @@ static void kernel_shell_dispatch(char* line){
     else if(cmd_is(cmd,"cap") || cmd_is(cmd,"caps")) security_cap_cmd(arg);
     else if(cmd_is(cmd,"event") || cmd_is(cmd,"on")) events_cmd(arg);
     else if(cmd_is(cmd,"net") || cmd_is(cmd,"network")) net_cmd(arg);
+    else if(cmd_is(cmd,"privacy") || cmd_is(cmd,"control") || cmd_is(cmd,"connections")) privacy_cmd(arg);
     else if(cmd_is(cmd,"security") || cmd_is(cmd,"sec")) security_cmd(arg);
     else if(cmd_is(cmd,"job") || cmd_is(cmd,"jobs")) jobs_cmd(arg);
     else if(cmd_is(cmd,"sched") || cmd_is(cmd,"scheduler")) sched_cmd(arg);
@@ -1595,6 +1599,7 @@ void kmain(uint32_t mb_magic, uint32_t mb_info_addr){
     window_init();
     events_init();
     security_init();
+    privacy_init();
     service_init();
     vfs_init();
     fd_init();
@@ -1603,6 +1608,7 @@ void kmain(uint32_t mb_magic, uint32_t mb_info_addr){
     net_init();
     gui_init();
     fb_init();
+    mouse_init();
     jobs_init();
     sched_init();
     loader_set_call_handler(shell_eval);
@@ -1631,6 +1637,8 @@ void kmain(uint32_t mb_magic, uint32_t mb_info_addr){
     serial_puts("timer ok\n");
     keyboard_install();
     serial_puts("keyboard ok\n");
+    mouse_install();
+    serial_puts("mouse ok\n");
     os_log("system", "boot: core drivers initialized");
 
     __asm__ __volatile__("sti");

@@ -1,6 +1,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "console.h"
+#include "editor.h"
 #include "events.h"
 #include "fs.h"
 #include "lang.h"
@@ -50,6 +51,22 @@ struct rusa_runtime {
 
 static struct rusa_runtime runtime;
 static void (*call_handler)(char* command) = 0;
+
+struct rusa_diag {
+    int active;
+    char origin[64];
+    uint32_t line;
+    uint32_t col;
+    char title[64];
+    char detail[160];
+    char hint[160];
+    char source_line[128];
+};
+
+static struct rusa_diag last_diag;
+static const char* current_source = 0;
+static const char* current_origin = "<eval>";
+static const char* current_stmt_pos = 0;
 
 static char lower_char(char c){
     return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c;
@@ -134,6 +151,87 @@ static void trim_in_place(char* s){
     } else {
         s[end] = 0;
     }
+}
+
+static void diag_location(const char* pos, uint32_t* line, uint32_t* col){
+    *line = 1;
+    *col = 1;
+    if(!current_source || !pos || pos < current_source)
+        return;
+    for(const char* p = current_source; *p && p < pos; p++){
+        if(*p == '\n'){
+            (*line)++;
+            *col = 1;
+        } else {
+            (*col)++;
+        }
+    }
+}
+
+static void diag_source_line(uint32_t line_no, char* out, size_t max){
+    uint32_t line = 1;
+    const char* start = current_source ? current_source : "";
+    const char* end;
+    while(*start && line < line_no){
+        if(*start == '\n') line++;
+        start++;
+    }
+    end = start;
+    while(*end && *end != '\n') end++;
+    copy_span(out, max, start, end);
+}
+
+static void diag_set(const char* pos, const char* title, const char* detail, const char* hint){
+    if(last_diag.active)
+        return;
+    last_diag.active = 1;
+    copy_text(last_diag.origin, sizeof(last_diag.origin), current_origin ? current_origin : "<eval>");
+    diag_location(pos ? pos : current_source, &last_diag.line, &last_diag.col);
+    copy_text(last_diag.title, sizeof(last_diag.title), title);
+    copy_text(last_diag.detail, sizeof(last_diag.detail), detail);
+    copy_text(last_diag.hint, sizeof(last_diag.hint), hint);
+    diag_source_line(last_diag.line, last_diag.source_line, sizeof(last_diag.source_line));
+}
+
+static void diag_print(void){
+    if(!last_diag.active) return;
+    console_puts("Rusa found a problem\n");
+    console_puts("where: ");
+    console_puts(last_diag.origin);
+    console_putc(':');
+    console_write_dec(last_diag.line);
+    console_putc(':');
+    console_write_dec(last_diag.col);
+    console_putc('\n');
+    console_puts("what: ");
+    console_puts(last_diag.title);
+    console_putc('\n');
+    console_puts("plain english: ");
+    console_puts(last_diag.detail);
+    console_putc('\n');
+    console_puts("source: ");
+    console_puts(last_diag.source_line);
+    console_putc('\n');
+    console_puts("        ");
+    for(uint32_t i=1; i<last_diag.col; i++)
+        console_putc(' ');
+    console_puts("^\n");
+    console_puts("try: ");
+    console_puts(last_diag.hint);
+    console_putc('\n');
+    console_puts("open: lang open-error\n");
+}
+
+static int diag_has(void){
+    return last_diag.active;
+}
+
+static void diag_clear(void){
+    last_diag.active = 0;
+    last_diag.title[0] = 0;
+    last_diag.detail[0] = 0;
+    last_diag.hint[0] = 0;
+    last_diag.source_line[0] = 0;
 }
 
 static struct rusa_value value_int(int32_t n){
@@ -389,9 +487,10 @@ static struct rusa_value call_function(const char* name, const char* args){
     const char* p = args;
     uint32_t argc = 0;
     if(!fn){
-        console_puts("rusa: function not found ");
-        console_puts(name);
-        console_putc('\n');
+        diag_set(current_stmt_pos,
+                 "function not found",
+                 "This function name has not been defined yet. Define it with fn before calling it, or import the module that provides it.",
+                 "Example: fn greet(name: string) { print name } then call greet(\"tabla\")");
         return value_int(0);
     }
     while(*p && argc < RUSA_PARAM_MAX){
@@ -483,7 +582,14 @@ static const char* parse_primary(const char* p, struct rusa_value* out){
             *out = value_bool(0);
         } else {
             struct rusa_var* v = var_find(name);
-            *out = v ? v->value : value_int(0);
+            if(v){
+                *out = v->value;
+            } else {
+                diag_set(current_stmt_pos, "unknown name",
+                         "This name has not been created yet. Rusa variables are made with let before they are used.",
+                         "Add a line like: let value: int = 0 before using this name.");
+                *out = value_int(0);
+            }
         }
         return p;
     }
@@ -491,7 +597,7 @@ static const char* parse_primary(const char* p, struct rusa_value* out){
     return p;
 }
 
-static void assign_var(const char* statement, int declare){
+static void assign_var(const char* statement, const char* source_pos, int declare){
     char name[24];
     char type_name[16];
     char expr[128];
@@ -501,6 +607,13 @@ static void assign_var(const char* statement, int declare){
     if(declare) p += 3;
     else p += 3;
     p = read_name(p, name, sizeof(name));
+    if(name[0] == 0){
+        diag_set(source_pos ? source_pos : current_stmt_pos,
+                 "missing variable name",
+                 "A variable statement needs a name after let or set.",
+                 "Write something like: let count: int = 0");
+        return;
+    }
     p = skip_ws(p);
     if(*p == ':'){
         p++;
@@ -509,7 +622,10 @@ static void assign_var(const char* statement, int declare){
         p = skip_ws(p);
     }
     if(*p != '='){
-        console_puts("rusa: expected =\n");
+        diag_set(source_pos ? source_pos + (p - statement) : current_stmt_pos,
+                 "missing equals sign",
+                 "Rusa expected '=' before the value you want to store.",
+                 "Use: let name: int = 1 or set name = name + 1");
         return;
     }
     eq = p + 1;
@@ -518,20 +634,24 @@ static void assign_var(const char* statement, int declare){
     struct rusa_value value = eval_expr(expr);
     struct rusa_var* var = var_put(name);
     if(!var){
-        console_puts("rusa: variable table full\n");
+        diag_set(source_pos ? source_pos : current_stmt_pos,
+                 "too many variables",
+                 "This small early runtime has run out of variable slots.",
+                 "Reuse a variable name or shorten the program for now.");
         return;
     }
     var->type = type == RUSA_NONE ? value.type : type;
     var->value = value;
 }
 
-static int eval_statement(char* statement){
+static int eval_statement(char* statement, const char* source_pos){
+    current_stmt_pos = source_pos;
     trim_in_place(statement);
     if(statement[0] == 0) return 0;
     if(str_starts_kw(statement, "let")){
-        assign_var(statement, 1);
+        assign_var(statement, source_pos, 1);
     } else if(str_starts_kw(statement, "set")){
-        assign_var(statement, 0);
+        assign_var(statement, source_pos, 0);
     } else if(str_starts_kw(statement, "return")){
         runtime.return_value = eval_expr(statement + 6);
         runtime.returning = 1;
@@ -554,6 +674,12 @@ static int eval_statement(char* statement){
         char name[24];
         const char* p = read_name(statement + 4, name, sizeof(name));
         char args[128];
+        if(name[0] == 0){
+            diag_set(source_pos, "missing function name",
+                     "The call statement needs to say which function to run.",
+                     "Use: call greet(\"tabla\")");
+            return 1;
+        }
         copy_text(args, sizeof(args), p);
         trim_in_place(args);
         if(args[0] == '('){
@@ -568,10 +694,16 @@ static int eval_statement(char* statement){
     } else if(object_eval(statement)) {
         return 0;
     } else {
-        struct rusa_value v = eval_expr(statement);
-        (void)v;
+        char name[24];
+        read_name(statement, name, sizeof(name));
+        if(name[0]){
+            diag_set(source_pos, "unknown statement",
+                     "Rusa does not know how to run this line as a keyword, function, or OS object.",
+                     "Try one of: let, set, print, fn, if, while, repeat, call, run, on, or file[\"...\"]");
+            return 1;
+        }
     }
-    return runtime.returning;
+    return runtime.returning || diag_has();
 }
 
 static void parse_params(struct rusa_fn* fn, const char* start, const char* end){
@@ -598,9 +730,19 @@ static const char* eval_braced_statement(const char* p){
     const char* close;
     char header[128];
     char body[RUSA_BODY_MAX];
-    if(!brace) return statement_end(p);
+    if(!brace){
+        diag_set(p, "missing opening brace",
+                 "This block statement needs a '{' to mark where its body begins.",
+                 "Use braces like: while count < 3 { print count }");
+        return statement_end(p);
+    }
     close = find_matching(brace, '{', '}');
-    if(!close) return statement_end(p);
+    if(!close){
+        diag_set(brace, "missing closing brace",
+                 "Rusa found the start of a block, but it never found the matching '}'.",
+                 "Add a closing brace at the end of this block.");
+        return statement_end(p);
+    }
     copy_span(header, sizeof(header), p, brace);
     trim_in_place(header);
     copy_span(body, sizeof(body), brace + 1, close);
@@ -641,8 +783,20 @@ static const char* eval_braced_statement(const char* p){
         while(*open && *open != '(') open++;
         const char* end = *open == '(' ? find_matching(open, '(', ')') : 0;
         struct rusa_fn* fn = fn_put(name);
+        if(name[0] == 0){
+            diag_set(p, "missing function name",
+                     "A function definition needs a name after fn.",
+                     "Use: fn greet(name: string) { print name }");
+            return close + 1;
+        }
+        if(!end){
+            diag_set(open, "missing parameter list",
+                     "A function definition needs parentheses after its name.",
+                     "Use empty parentheses if there are no inputs: fn start() { print \"go\" }");
+            return close + 1;
+        }
         if(fn){
-            if(end) parse_params(fn, open + 1, end);
+            parse_params(fn, open + 1, end);
             copy_text(fn->body, sizeof(fn->body), body);
         }
     } else if(str_starts_kw(header, "on")){
@@ -662,16 +816,22 @@ static const char* eval_braced_statement(const char* p){
         name[9] = 0;
         runtime.event_id++;
         if(events_register_source(name, trigger, body) != 0)
-            console_puts("rusa: event table full\n");
+            diag_set(p, "event table full",
+                     "The OS event table has no free slots for another persistent Rusa handler.",
+                     "Remove or reuse an existing event handler.");
     } else if(str_starts_kw(header, "parallel")){
         eval_block(body);
+    } else {
+        diag_set(p, "unknown block",
+                 "This looks like a block, but Rusa does not recognize the keyword before it.",
+                 "Use if, while, repeat, fn, on, or parallel before a brace block.");
     }
     return close + 1;
 }
 
 static int eval_block(const char* source){
     const char* p = source;
-    while(*p && !runtime.returning){
+    while(*p && !runtime.returning && !diag_has()){
         p = skip_ws(p);
         if(*p == 0) break;
         if(str_starts_kw(p, "if") || str_starts_kw(p, "while") || str_starts_kw(p, "repeat") ||
@@ -682,17 +842,20 @@ static int eval_block(const char* source){
         const char* end = statement_end(p);
         char stmt[192];
         copy_span(stmt, sizeof(stmt), p, end);
-        eval_statement(stmt);
+        eval_statement(stmt, p);
         p = end;
         if(*p == ';' || *p == '\n') p++;
     }
-    return runtime.returning ? 1 : 0;
+    return (runtime.returning || diag_has()) ? 1 : 0;
 }
 
 static int import_module(const char* name, uint32_t depth){
     char path[64];
     const char* text;
+    const char* saved_source = current_source;
+    const char* saved_origin = current_origin;
     size_t pos = 0;
+    int result;
     if(depth > RUSA_IMPORT_DEPTH) return -1;
     pos = 0;
     pos += 0;
@@ -707,17 +870,84 @@ static int import_module(const char* name, uint32_t depth){
     path[pos++] = 'a';
     path[pos] = 0;
     if(fs_read(path, &text) != 0) return -1;
-    return lang_run_source(text, path, "");
+    result = lang_run_source(text, path, "");
+    current_source = saved_source;
+    current_origin = saved_origin;
+    diag_clear();
+    return result;
+}
+
+static int lang_preflight(const char* source){
+    int brace_depth = 0;
+    int paren_depth = 0;
+    int quoted = 0;
+    const char* last_brace = source;
+    const char* last_paren = source;
+    for(const char* p = source; p && *p; p++){
+        if(*p == '"')
+            quoted = !quoted;
+        if(quoted)
+            continue;
+        if(*p == '{'){
+            brace_depth++;
+            last_brace = p;
+        } else if(*p == '}'){
+            brace_depth--;
+            if(brace_depth < 0){
+                diag_set(p, "extra closing brace",
+                         "There is a '}' here, but Rusa is not inside a block that needs closing.",
+                         "Remove this brace or add a matching opening brace earlier.");
+                return -1;
+            }
+        } else if(*p == '('){
+            paren_depth++;
+            last_paren = p;
+        } else if(*p == ')'){
+            paren_depth--;
+            if(paren_depth < 0){
+                diag_set(p, "extra closing parenthesis",
+                         "There is a ')' here, but Rusa is not inside parentheses.",
+                         "Remove this parenthesis or add a matching '(' earlier.");
+                return -1;
+            }
+        }
+    }
+    if(quoted){
+        diag_set(source, "unclosed string",
+                 "A string started with a quote, but never closed.",
+                 "Add a closing quote, for example: print \"hello\"");
+        return -1;
+    }
+    if(paren_depth > 0){
+        diag_set(last_paren, "missing closing parenthesis",
+                 "Rusa found '(' but did not find the matching ')'.",
+                 "Close the parentheses before the end of the statement.");
+        return -1;
+    }
+    if(brace_depth > 0){
+        diag_set(last_brace, "missing closing brace",
+                 "Rusa found '{' but did not find the matching '}'.",
+                 "Add a closing brace at the end of the block.");
+        return -1;
+    }
+    return 0;
 }
 
 int lang_run_source(const char* source, const char* origin, const char* args){
     (void)args;
     const char* p = source;
+    current_source = source;
+    current_origin = origin ? origin : "<inline>";
+    diag_clear();
     runtime.returning = 0;
     runtime.return_value = value_int(0);
     console_puts("rusa ");
     console_puts(origin ? origin : "<inline>");
     console_putc('\n');
+    if(lang_preflight(source) != 0){
+        diag_print();
+        return -1;
+    }
     while(*p){
         p = skip_ws(p);
         if(str_starts_kw(p, "import")){
@@ -733,9 +963,11 @@ int lang_run_source(const char* source, const char* origin, const char* args){
                 copy_text(name, sizeof(name), stmt);
             }
             if(import_module(name, 0) != 0){
-                console_puts("rusa: import not found ");
-                console_puts(name);
-                console_putc('\n');
+                diag_set(p, "import not found",
+                         "Rusa could not find a reusable module with this name in /lib/rusa.",
+                         "Check the spelling or create /lib/rusa/name.rusa.");
+                diag_print();
+                return -1;
             }
             p = end;
             if(*p == ';' || *p == '\n') p++;
@@ -744,13 +976,17 @@ int lang_run_source(const char* source, const char* origin, const char* args){
         }
     }
     eval_block(p);
+    if(diag_has()){
+        diag_print();
+        return -1;
+    }
     return 0;
 }
 
 int lang_run_file(const char* path, const char* args){
     const char* text;
     if(fs_read(path, &text) != 0)
-        return -1;
+        return -2;
     return lang_run_source(text, path, args);
 }
 
@@ -768,7 +1004,8 @@ void lang_init(void){
     fs_write("/share/rusa/README",
         "Rusa is the native Tabla Rusa OS language.\n"
         "It uses readable statements with braces for blocks, typed values, functions, loops, imports, and OS objects.\n"
-        "Source files use .rusa. TRX remains the lower-level bytecode format.\n");
+        "Source files use .rusa. TRX remains the lower-level bytecode format.\n"
+        "Diagnostics show plain-English errors with line, column, source highlight, and lang open-error.\n");
     fs_write("/share/rusa/keywords",
         "import\nlet\nset\nfn\nreturn\nif\nelse\nwhile\nrepeat\nparallel\non\nrun\ncall\nprint\ntrue\nfalse\n"
         "file\nprocess\nservice\nwindow\nprogram\nmath\nphys\n");
@@ -785,6 +1022,13 @@ void lang_init(void){
         "call greet(\"tabla\")\n"
         "on \"fs.write\" { print \"filesystem changed\" }\n"
         "file[\"/home/readme.txt\"].read()\n");
+    fs_write("/share/rusa/diagnostics",
+        "Rusa diagnostics:\n"
+        "lang check /home/projects/app.rusa\n"
+        "lang run /home/projects/app.rusa\n"
+        "lang last-error\n"
+        "lang open-error\n"
+        "Errors include where, plain english, source, caret, and an editor jump command.\n");
     fs_write("/share/rusa/objects",
         "file: read exists open write\n"
         "process: trace stop\n"
@@ -849,9 +1093,30 @@ void lang_cmd(char* arg){
         else console_puts("import: module not found\n");
     } else if(str_eq(action, "run")){
         const char* path = first_arg(rest, &rest);
-        if(lang_run_file(path, rest) != 0) console_puts("rusa: source not found\n");
+        int result = lang_run_file(path, rest);
+        if(result == -2) console_puts("rusa: source not found\n");
+    } else if(str_eq(action, "check")){
+        const char* path = first_arg(rest, &rest);
+        if(path[0] == 0){
+            console_puts("usage: lang check PATH\n");
+        } else {
+            int result = lang_run_file(path, rest);
+            if(result == 0) console_puts("rusa check: ok\n");
+            else if(result == -2) console_puts("rusa: source not found\n");
+        }
     } else if(str_eq(action, "eval")){
         lang_run_source(rest, "<eval>", "");
+    } else if(str_eq(action, "last-error") || str_eq(action, "diag")){
+        if(last_diag.active) diag_print();
+        else console_puts("rusa: no saved diagnostic\n");
+    } else if(str_eq(action, "open-error")){
+        if(!last_diag.active){
+            console_puts("rusa: no saved diagnostic\n");
+        } else if(last_diag.origin[0] == '<'){
+            console_puts("rusa: this diagnostic came from eval text, not a file\n");
+        } else {
+            editor_open_at(last_diag.origin, last_diag.line, last_diag.col, last_diag.title);
+        }
     } else if(str_eq(action, "object")){
         const char* name = first_arg(rest, &rest);
         const char* text;
@@ -865,6 +1130,6 @@ void lang_cmd(char* arg){
             console_puts(": see /share/rusa/objects\n");
         }
     } else {
-        console_puts("usage: lang about | keywords | examples | docs | stdlib | std | import NAME | run PATH | eval SOURCE | object [NAME]\n");
+        console_puts("usage: lang about | keywords | examples | docs | stdlib | std | import NAME | run/check PATH | eval SOURCE | last-error | open-error | object [NAME]\n");
     }
 }

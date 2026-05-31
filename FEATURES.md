@@ -2,7 +2,7 @@
 
 This file is the living feature ledger for Tabla Rusa OS. Update it after each development prompt.
 
-Last updated: after the Rusa 0.2 source parser/runtime pass with variables, typed values, expressions, functions, loops, imports, and persistent source event handlers.
+Last updated: after the networking packet-buffer pass with loopback TX/RX queues, packet tracing, checksums, UDP datagrams, and TCP-ish state transitions.
 
 ## Current Kernel Shape
 
@@ -23,6 +23,11 @@ Last updated: after the Rusa 0.2 source parser/runtime pass with variables, type
 - Loops support `while` and `repeat`; `if`/`else` and `parallel { ... }` blocks are parsed.
 - `import std` loads reusable source from `/lib/rusa/std.rusa`.
 - `on "trigger" { ... }` registers persistent Rusa source event handlers with the OS event bus.
+- Rusa diagnostics now report file, line, column, plain-English explanation, source snippet, caret highlight, and a suggested fix.
+- `lang check PATH` validates a `.rusa` file and saves the latest diagnostic.
+- `lang last-error` reprints the saved diagnostic.
+- `lang open-error` opens the failing file in the editor and highlights the problem line/column.
+- Diagnostics currently catch common syntax and runtime mistakes such as missing braces, extra braces, missing parentheses, unclosed strings, missing `=`, missing variable/function names, unknown names, unknown statements, missing imports, and full event/variable tables.
 - Command history, cursor-aware input editing, and an editor prompt.
 - Shell input/session state lives in `shell.c`.
 - Native forms include `inspect memory`, `spawn editor`, and object expressions such as `file["/home/a"].read()`.
@@ -49,6 +54,9 @@ lang examples
 lang std
 lang import std
 lang run /home/projects/demo.rusa
+lang check /home/projects/demo.rusa
+lang last-error
+lang open-error
 lang eval fn inc(x: int) { return x + 1 } print inc(4)
 lang object file
 ```
@@ -83,6 +91,19 @@ on "fs.write" {
 file["/home/readme.txt"].read()
 ```
 
+Example diagnostic:
+
+```text
+Rusa found a problem
+where: /home/projects/bad.rusa:1:12
+what: missing equals sign
+plain english: Rusa expected '=' before the value you want to store.
+source: let broken 3
+                   ^
+try: Use: let name: int = 1 or set name = name + 1
+open: lang open-error
+```
+
 ## Editor
 
 - Numbered line editor with Esc and `:q` exit.
@@ -107,11 +128,15 @@ Inside the editor, use arrow keys to move between and within lines. Enter saves 
 - VFS layer tracks ramfs, procfs, sysfs, devfs, pkgfs, and mathfs namespaces.
 - Protected namespace write checks exist for `/proc`, `/system`, and `/boot`.
 - File descriptor layer added with `fd open/read/write/close/list`.
-- File descriptors record owner PID and descriptor type.
-- Socket creation allocates a descriptor, so files and sockets start sharing one descriptor namespace.
+- File descriptors now live in per-process descriptor tables with local fd numbers.
+- `fd list` shows the shell process table; `fd list PROC` and `fd all` inspect other process tables.
+- `fd openfor PROC PATH MODE` opens a descriptor in another process table for debugging.
+- File descriptors record owner PID, descriptor type, mode, path/label, and simple offset accounting.
+- Socket creation allocates a descriptor in the owning process table, so files and sockets share the same per-process namespace.
 - Socket descriptors can be used through `fd read` and `fd write`.
+- Stopping a process releases its descriptor table.
 - Block device layer added with an 8-sector RAM disk and save/load bridges.
-- Remaining work: true per-process descriptor tables, seek offsets, file permissions, and persistent disk storage.
+- Remaining work: real seek offsets, descriptor inheritance, file permissions, and persistent disk storage.
 
 Examples:
 
@@ -124,6 +149,9 @@ fd open /home/demo.txt rw
 fd write 0 updated-through-fd
 fd read 0
 fd close 0
+fd openfor compute /tmp/compute.txt rw
+fd list compute
+fd all
 block status
 block write 1 sector-data
 block read 1
@@ -174,10 +202,16 @@ TICK 24
 ## Scheduler, Processes, Jobs, Task Manager
 
 - Process table tracks pid, running state, priority, workload, CPU hints, and ticks.
+- Process entries now track context-switch counts and last-run timer ticks.
+- Process stop releases descriptors owned by that process.
 - Job table tracks named workload classes and tick accounting.
-- Cooperative scheduler queue added with `sched list/yield/wake/sleep/quantum`.
+- Scheduler has fixed task contexts for shell, logger, network, gui, compute, and idle.
+- Each scheduler task tracks state, quantum, run count, saved program counter, synthetic stack pointer, stack range, wake tick, and task step function.
+- Timer interrupts periodically dispatch scheduler tasks through `sched_on_timer`.
+- `sched yield`, `sched step`, and `sched run N` manually drive task execution for debugging.
+- `sched trace NAME` prints a task context snapshot.
 - Task manager aggregates processes, jobs, and services with `taskman top`.
-- Remaining work: actual task contexts, stacks, context switching, blocking waits, and per-process resources.
+- Remaining work: real CPU register save/restore, separate kernel stacks, blocking waits, and per-process resources.
 
 Examples:
 
@@ -186,10 +220,13 @@ ps
 jobs
 sched list
 sched yield
+sched run 4
+sched trace compute
 sched quantum compute 12
 sched sleep network
 sched wake network
 taskman top
+taskman fds
 taskman boost
 ```
 
@@ -197,10 +234,19 @@ taskman boost
 
 - Text-mode GUI desktop, tabs, focus, movement, and window list exist.
 - Vector graphics command surface supports line, rect, circle, and a sample scene.
-- Framebuffer descriptor layer tracks mode, surfaces, mouse coordinates, font/blit hooks.
-- Framebuffer tracks pixel and rectangle draw calls with `fb pixel` and `fb rect`.
-- Draw calls update a tiny stored pixel buffer; `fb blit` reports a checksum.
-- Remaining work: real multiboot framebuffer discovery, actual pixel plotting, bitmap font renderer, mouse driver, and window surface compositing.
+- Framebuffer layer now has an in-memory soft raster plane backing pixel, rectangle, text, GUI, and screensaver output.
+- The logical framebuffer mode remains configurable while the debug raster is stored as a compact 96x54 pixel plane.
+- Soft text rendering exists through `fb text` and `fb_draw_text`.
+- `gui start` rasterizes the desktop layout into the framebuffer before drawing the text-mode desktop.
+- `fb demo` draws a GUI desktop preview into the raster.
+- `fb dump [W H]` prints an ASCII luminance preview of the current raster.
+- `fb saver lava|rain|stars|waves [N]` advances soothing screensaver frame generators.
+- `fb blit` reports the current raster checksum, standing in for compositing to a physical primary buffer.
+- Mouse input subsystem tracks crosshair position, buttons, event count, and a light IRQ12 packet path.
+- `mouse set/move/click/down/up/status` drives the GUI pointer in testable form.
+- The framebuffer dump overlays the pointer as a crosshair instead of an arrow cursor.
+- `gui click X Y` routes a click through the mouse layer and focuses the matching desktop quadrant/window.
+- Remaining work: real multiboot framebuffer address discovery, hardware pixel plotting, fuller PS/2 mouse initialization, dirty rectangles, and real window surface compositing.
 
 Examples:
 
@@ -209,7 +255,11 @@ gui start
 gui tab
 gui focus editor
 gui move editor 4 8
+gui click 500 120
 window list
+mouse status
+mouse set 160 120
+mouse click
 gfx line 0 0 12 8
 gfx rect 2 2 20 6
 gfx circle 12 8 5
@@ -219,24 +269,37 @@ fb mode 800 600 32
 fb surface
 fb mouse 100 120
 fb pixel 4 4 255
-fb rect 10 10 40 20
-fb dump
+fb rect 10 10 40 20 180
+fb text 20 20 240 hello-gui
+fb demo
+fb dump 48 24
+fb saver lava 3
+fb saver rain 4
+fb saver stars 2
+fb saver waves 2
 fb blit
 ```
 
 ## Networking
 
-- Loopback and eth0 stub state exist.
+- Loopback and eth0 stub state exist, with `net iface` showing interface status.
 - IPv4, ARP, route, UDP/TCP surfaces are exposed.
-- Socket table supports `net socket`, `net connect`, `net send`, `net recv`, and `net sockets` using loopback buffers.
+- Network layer now stores real packet records with direction, interface, protocol, src/dst IP, ports, length, checksum, and payload.
+- TX/RX loopback queues are represented by packet records; `net packets` and `net trace` dump them.
+- Packet checksums are computed for each queued packet and tracked in stats.
+- Socket table supports `net socket`, `net connect`, `net send`, `net recv`, and `net sockets` using loopback packet delivery.
+- TCP sockets track simple state transitions such as `LISTEN`, `SYN-SENT`, and `ESTABLISHED`.
+- UDP sockets use an `OPEN` datagram path through the same packet queues.
+- `net stats` reports tx/rx/drops/checksum errors/state changes.
 - `net socket` allocates a file descriptor for the socket.
-- `fd write SOCKET_FD MSG` and `fd read SOCKET_FD` operate on socket descriptors.
-- Remaining work: real packet buffers, checksums, protocol state machines, and NIC driver.
+- `fd write SOCKET_FD MSG` and `fd read SOCKET_FD` operate on socket descriptors in the owning process table.
+- Remaining work: real NIC driver, ARP cache mutation, ICMP packets, TCP retransmit/window handling, packet ring buffers, and external network I/O.
 
 Examples:
 
 ```text
 net status
+net iface
 net up
 net arp
 net route
@@ -249,6 +312,10 @@ fd read 0
 net connect 0 8081
 net send 0 hello-loopback
 net recv 0
+net packets
+net trace
+net stats
+net flush
 net sockets
 ```
 
@@ -315,6 +382,7 @@ math phys electric 3 -4 2
 math phys magnetic 2 7 5
 math phys fields 1 2 3 | 4 5 6
 taskman top
+taskman fds
 ```
 
 ## Project Workspace
@@ -348,6 +416,12 @@ object eval file["/home/readme.txt"].open()
 sched list
 sched yield
 fb status
+mouse status
+mouse set 160 120
+mouse click
+gui click 500 120
+fb demo
+fb dump 48 24
 fb surface
 net up
 net socket tcp 8080
@@ -362,23 +436,29 @@ The `test` command now checks the major non-interactive surfaces:
 console
 timer/memory/paging
 filesystem and file descriptors
+per-process descriptor count
 program manifests and TRX hello execution
 object dispatcher
 scheduler yield
-framebuffer/vector/network descriptors
+scheduler context switch
+framebuffer descriptor and raster
+mouse crosshair input
+vector/network descriptors
+network packet queue
 block device descriptor
 Rusa docs and stdlib
 Rusa source stdlib
 Rusa source runtime
+Rusa diagnostics
 Rusa persistent events
 Rusa object docs
 security mode
 ```
 
-Some graphical commands such as `gui start` and `gfx scene` intentionally redraw the text desktop, so the selftest checks their manifests/descriptors instead of running every screen-clearing path.
+Some graphical commands such as `gui start` and `gfx scene` intentionally redraw the text desktop. The selftest now checks the framebuffer descriptor and raster checksum directly, while screen-clearing paths remain smoke-tested manually.
 
 Latest QEMU selftest result:
 
 ```text
-selftest pass=31 fail=0
+selftest pass=37 fail=0
 ```

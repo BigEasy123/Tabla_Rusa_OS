@@ -141,12 +141,21 @@ int object_eval(const char* line){
             console_write_dec(proc->priority);
             console_puts(" ticks=");
             console_write_dec(proc->ticks);
+            console_puts(" fds=");
+            console_write_dec(fd_count_for_pid(proc->pid));
             console_putc('\n');
+        } else if(str_starts(rest, "fds()")){
+            char command[48] = "list ";
+            size_t pos = 5;
+            for(size_t i=0; key[i] && pos + 1 < sizeof(command); i++)
+                command[pos++] = key[i];
+            command[pos] = 0;
+            fd_cmd(command);
         } else if(str_starts(rest, "stop()")){
             process_stop(key);
             console_puts("process.stop: ok\n");
         } else {
-            console_puts("object process methods: trace stop\n");
+            console_puts("object process methods: trace fds stop\n");
         }
     } else if(str_eq(type, "service")){
         if(str_starts(rest, "start()")){

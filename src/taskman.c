@@ -1,4 +1,5 @@
 #include "console.h"
+#include "fd.h"
 #include "fs.h"
 #include "jobs.h"
 #include "process.h"
@@ -47,6 +48,9 @@ void taskman_cmd(char* arg){
         console_puts("TASK MANAGER\n");
         console_puts("processes:\n");
         process_list();
+        console_puts("fds:\n");
+        char all[] = "all";
+        fd_cmd(all);
         console_puts("jobs:\n");
         char list[] = "list";
         jobs_cmd(list);
@@ -55,6 +59,9 @@ void taskman_cmd(char* arg){
     } else if(str_eq(action, "jobs")){
         char list[] = "list";
         jobs_cmd(list);
+    } else if(str_eq(action, "fds")){
+        char all[] = "all";
+        fd_cmd(all);
     } else if(str_eq(action, "services")){
         char list[] = "list";
         service_cmd(list);
@@ -73,6 +80,6 @@ void taskman_cmd(char* arg){
         jobs_account("math-worker", 4);
         console_puts("taskman: compute process boosted priority=99\n");
     } else {
-        console_puts("usage: taskman top | ps | jobs | services | kill NAME | boost\n");
+        console_puts("usage: taskman top | ps | jobs | fds | services | kill NAME | boost\n");
     }
 }

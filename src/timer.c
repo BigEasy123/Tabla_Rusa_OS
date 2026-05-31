@@ -1,4 +1,5 @@
 #include "timer.h"
+#include "sched.h"
 
 #define PIT_COMMAND 0x43
 #define PIT_CHANNEL0 0x40
@@ -34,6 +35,7 @@ void timer_init(uint32_t hz){
 
 void timer_handler(void){
     ticks++;
+    sched_on_timer();
 }
 
 uint32_t timer_ticks(void){

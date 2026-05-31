@@ -1,5 +1,6 @@
 #include "idt.h"
 #include "keyboard.h"
+#include "mouse.h"
 #include "timer.h"
 #include "console.h"
 #include <stdint.h>
@@ -108,6 +109,8 @@ void isr_common_handler(struct interrupt_frame* frame){
         timer_handler();
     else if(frame->int_no == 33)
         keyboard_handler();
+    else if(frame->int_no == 44)
+        mouse_handler();
 
     if(frame->int_no >= 40)
         outb(0xA0, 0x20);

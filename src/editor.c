@@ -16,6 +16,9 @@ static char path_current[64];
 static char lines[EDITOR_MAX_LINES][EDITOR_LINE_MAX];
 static size_t line_count = 0;
 static size_t current_line = 0;
+static size_t highlight_line = 0;
+static size_t highlight_col = 0;
+static char highlight_message[96];
 
 static char lower_char(char c){
     if(c >= 'A' && c <= 'Z')
@@ -48,6 +51,7 @@ void editor_init(void){
     path_current[0] = 0;
     line_count = 0;
     current_line = 0;
+    highlight_message[0] = 0;
 }
 
 int editor_is_active(void){
@@ -65,6 +69,7 @@ void editor_close(void){
     path_current[0] = 0;
     line_count = 0;
     current_line = 0;
+    highlight_message[0] = 0;
     console_clear_output();
     console_puts("editor closed\n");
 }
@@ -89,6 +94,14 @@ static void editor_render(void){
         console_puts(" | ");
         console_puts(lines[i]);
         console_putc('\n');
+        if(highlight_message[0] && i == highlight_line){
+            console_puts("       ");
+            for(size_t col=0; col<highlight_col && col<EDITOR_LINE_MAX - 1; col++)
+                console_putc(' ');
+            console_puts("^\n       ");
+            console_puts(highlight_message);
+            console_putc('\n');
+        }
     }
     if(line_count == 0 || current_line == line_count){
         console_puts("> ");
@@ -146,11 +159,24 @@ void editor_open(const char* path){
     fs_touch(path_current);
     fs_read(path_current, &text);
     editor_load(text);
+    highlight_message[0] = 0;
     active = 1;
     shell_set_editor_mode(1);
     process_set_running("editor", 1);
     window_focus("editor");
     events_emit("process.start:editor");
+    editor_render();
+}
+
+void editor_open_at(const char* path, uint32_t line, uint32_t col, const char* message){
+    editor_open(path);
+    if(line > 0 && line <= line_count)
+        current_line = line - 1;
+    else if(line_count)
+        current_line = 0;
+    highlight_line = current_line;
+    highlight_col = col > 0 ? col - 1 : 0;
+    str_copy(highlight_message, message ? message : "look here", sizeof(highlight_message));
     editor_render();
 }
 
@@ -216,6 +242,7 @@ void editor_move_horizontal(int delta, size_t* len){
 }
 
 void editor_eval(char* line, size_t* len){
+    highlight_message[0] = 0;
     if(str_is(line, ".quit") || str_is(line, ".q") || str_is(line, ".exit") ||
        str_is(line, ":q") || str_is(line, "exit")){
         editor_close();
