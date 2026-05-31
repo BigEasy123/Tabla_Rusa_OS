@@ -2,13 +2,20 @@
 
 This file is the living feature ledger for Tabla Rusa OS. Update it after each development prompt.
 
-Last updated: after the networking packet-buffer pass with loopback TX/RX queues, packet tracing, checksums, UDP datagrams, and TCP-ish state transitions.
+Last updated: after making the GUI editor editable, adding reliable Close Window controls, adding Rusa `nswitch`, and increasing the kernel boot stack.
 
 ## Current Kernel Shape
 
-- i386 multiboot2 kernel with VGA text console, serial logging, IDT/PIC/timer/keyboard, heap, paging, memory map reporting, and RAM filesystem.
+- i386 multiboot2 kernel with VGA text console, terminal scrollback, serial logging, IDT/PIC/timer/keyboard, heap, paging, memory map reporting, and RAM filesystem.
 - Native shell/language surface is launched from `kmain.c`, while shell session state, editor state, dispatch bridge, and most OS behaviors live behind subsystem modules.
-- Boot includes ASCII intro and `/home`, `/system`, `/proc`, `/pkg`, `/dev`, `/var/log`, `/share/docs`, and `/home/math`.
+- Boot includes ASCII intro, a full-stack autostart path, and `/home`, `/system`, `/proc`, `/pkg`, `/dev`, `/var/log`, `/share/docs`, and `/home/math`.
+- The boot path now starts networking, GUI compositor state, scheduler state, and the crosshair pointer by default.
+- GUI boot writes `/system/gui/state.txt` so autostart state is inspectable after startup.
+- `make run` launches the graphical QEMU SDL display so keyboard and pointer focus are more predictable; `make run-gtk` is a graphical fallback; `make run-text` keeps the old curses backend for text-only testing.
+- Boot now requests a 1024x768x32 linear framebuffer from GRUB and lands directly in GUI desktop mode.
+- The shell prompt is hidden until Enter opens the terminal.
+- PS/2 mouse setup explicitly enables the AUX device and AUX IRQs through the controller config byte.
+- The early boot stack is now 32 KiB, giving the growing GUI and Rusa parser enough room for nested parser/editor work.
 
 ## Shell And Native Language
 
@@ -21,10 +28,13 @@ Last updated: after the networking packet-buffer pass with loopback TX/RX queues
 - Block syntax uses braces, keeping the language readable without indentation dependency.
 - Functions support parameters, optional parameter type annotations, `return`, and `call`.
 - Loops support `while` and `repeat`; `if`/`else` and `parallel { ... }` blocks are parsed.
+- N-dimensional switch blocks support `nswitch`, `case`, `default`, comma-separated dimensions, and `*` wildcards.
 - `import std` loads reusable source from `/lib/rusa/std.rusa`.
 - `on "trigger" { ... }` registers persistent Rusa source event handlers with the OS event bus.
 - Rusa diagnostics now report file, line, column, plain-English explanation, source snippet, caret highlight, and a suggested fix.
 - `lang check PATH` validates a `.rusa` file and saves the latest diagnostic.
+- `lang scan PATH` reads every source line and reports suspicious code in plain English before it runs.
+- `lang run PATH` stops before execution when the scanner finds risky lines such as privacy shutoff, security unlocks, endless loops, dangerous system writes, or network sends.
 - `lang last-error` reprints the saved diagnostic.
 - `lang open-error` opens the failing file in the editor and highlights the problem line/column.
 - Diagnostics currently catch common syntax and runtime mistakes such as missing braces, extra braces, missing parentheses, unclosed strings, missing `=`, missing variable/function names, unknown names, unknown statements, missing imports, and full event/variable tables.
@@ -55,6 +65,7 @@ lang std
 lang import std
 lang run /home/projects/demo.rusa
 lang check /home/projects/demo.rusa
+lang scan /home/projects/demo.rusa
 lang last-error
 lang open-error
 lang eval fn inc(x: int) { return x + 1 } print inc(4)
@@ -84,6 +95,14 @@ while count < 2 {
   set count = count + 1
 }
 
+let x: int = 1
+let y: int = 2
+nswitch x, y {
+  case 1, 2 { print "matched point" }
+  case 1, * { print "matched row" }
+  default { print "no match" }
+}
+
 on "fs.write" {
   print "filesystem changed"
 }
@@ -103,6 +122,107 @@ source: let broken 3
 try: Use: let name: int = 1 or set name = name + 1
 open: lang open-error
 ```
+
+Example security scan:
+
+```text
+write /home/projects/risky.rusa while true { print "loop" }
+lang scan /home/projects/risky.rusa
+lang run /home/projects/risky.rusa
+lang open-error
+```
+
+The scanner reports the file, line, column, readable issue title, and plain-English reason, then keeps the first issue available for editor jumping.
+
+## Console And Boot
+
+- VGA console output now keeps a 256-line terminal scrollback buffer.
+- `console_clear_output` starts a clean visible page while keeping older boot text reachable.
+- PageUp/PageDown scroll through terminal history.
+- Mouse wheel and touchpad scroll gestures now drive the same terminal scrollback.
+- The OS crosshair is drawn over the pixel desktop and mirrored into the soft framebuffer debug plane.
+- Mouse pointer sync is careful to update both the framebuffer debug plane and the VGA overlay without recursing through the input path.
+- The framebuffer cursor now restores the exact pixels under the crosshair, so mouse movement does not leave duplicate cursor trails.
+- `scroll up`, `scroll down`, `scroll top`, `scroll bottom`, and `scroll status` are shell commands.
+- GUI startup no longer destroys the ability to read boot messages; the boot log remains in scrollback and serial output.
+- Full-stack boot prints the ASCII intro, initializes core drivers, brings `net up`, starts the GUI desktop, and hides the terminal prompt.
+- Opening Terminal now enables a framebuffer-backed terminal mirror so shell output, Rusa commands, and editor prompts are visible in the graphical QEMU window.
+
+Examples:
+
+```text
+scroll status
+scroll up
+scroll down
+scroll top
+scroll bottom
+mouse scroll up
+mouse scroll down
+gui status
+net status
+service list
+```
+
+GUI boot controls:
+
+```text
+Enter   opens the terminal from the GUI desktop
+Esc     returns from the terminal to the GUI desktop
+Tab     cycles GUI focus
+Arrows  cycle GUI focus
+1..4    focus shell, inspector, editor, network panels
+5..8    focus files, math, privacy, task manager
+S       previews the lava screensaver
+Click   focuses GUI app panels; Terminal click opens the shell
+```
+
+GUI app launcher:
+
+```text
+gui app files      shows filesystem workspace and opens: tree /home
+gui app editor     opens the GUI-friendly hybrid Paper/Code editor
+gui app tasks      shows process/job/service surface and opens: taskman top
+gui app math       shows math/physics catalog and opens: math help
+gui app rusa       opens the standalone Rusa Workbench language app
+gui app settings   shows high-level privacy/cookie/network controls
+gui app privacy    shows master privacy/cookie state and opens: privacy status
+gui app net        shows network state and opens: net status
+gui app saver      shows screensaver launcher state
+gui cursor dot     high-contrast crosshair with black center dot
+gui cursor cross   plain white crosshair
+gui cursor target  alias for the dot/target style
+gui backdrop lava  uses lava as the animated desktop backdrop
+gui backdrop rain  uses rain as the animated desktop backdrop
+gui backdrop stars uses stars as the animated desktop backdrop
+gui backdrop waves uses waves as the animated desktop backdrop
+gui backdrop off   returns to the plain desktop wallpaper
+gui editor paper   switches the Editor app into paper drafting mode
+gui editor code    switches the Editor app into code workspace mode
+gui editor new     creates a fresh GUI-side document buffer
+gui editor open    loads the current mode's file into the GUI editor
+gui editor save    saves the GUI editor buffer to the current mode's file
+gui rusa examples  switches Rusa Workbench to examples
+gui rusa keywords  switches Rusa Workbench to keyword docs
+gui rusa docs      switches Rusa Workbench to language docs
+gui rusa check     switches Rusa Workbench to source checking
+gui rusa run       switches Rusa Workbench to source running
+gui rusa diagnostics switches Rusa Workbench to friendly errors
+gui close APP      closes a GUI app window
+gui saver lava     previews a pixel lava screensaver
+gui saver rain     previews falling rain
+gui saver stars    previews drifting stars
+gui saver waves    previews soft wave fields
+```
+
+Host-side launch commands:
+
+```text
+make run
+make run-gtk
+make run-text
+```
+
+For mouse/touchpad testing, click inside the QEMU graphics window first so QEMU owns input focus. Scrolling over the host terminal will scroll the host terminal history, not Tabla Rusa OS.
 
 ## Editor
 
@@ -233,20 +353,51 @@ taskman boost
 ## GUI, Framebuffer, Vector Graphics
 
 - Text-mode GUI desktop, tabs, focus, movement, and window list exist.
+- The GUI now requests and maps a real Multiboot2 linear framebuffer, then draws a pixel desktop at boot.
+- The desktop now follows a more traditional Windows/Ubuntu-style layout: top system bar, wallpaper area, left-side app icons, a centered app window, and a bottom taskbar.
+- Basic pictogram icons exist for Files, Terminal, Math, Rusa, Settings, Tasks, Network, and Saver.
+- Framebuffer text now uses a real 5x7 ASCII font for readable desktop labels instead of placeholder patterned glyphs.
+- The default GUI pointer is now a white crosshair with a black center dot for better visibility.
+- Cursor style can be changed from settings with `gui cursor dot`, `gui cursor cross`, or `gui cursor target`; the framebuffer command `fb cursor ...` exposes the same setting.
+- Terminal launch from the GUI switches on the framebuffer terminal renderer, so command output no longer disappears into the old VGA-only text console.
+- Non-terminal desktop icons now open GUI app windows instead of immediately dropping into Terminal.
+- Each GUI app window has an Open Terminal button for the matching command-line tool.
+- App windows can be closed with a larger titlebar close button or `gui close APP`.
+- App windows also include an obvious in-window Close Window button.
+- A dedicated hybrid Editor desktop app can switch between paper drafting mode and code workspace mode.
+- Editor Paper mode opens `/home/notes.txt`; Editor Code mode opens `/home/projects/demo.rusa`.
+- The Editor app includes GUI controls for Paper, Code, New, Open, Save, and Open File into the terminal editor.
+- Clicking inside the Editor document/code pane focuses a GUI-side text buffer.
+- While focused, the GUI Editor accepts typed characters, Backspace, Enter for new lines, and arrow-key cursor movement.
+- Save writes the GUI-side buffer back through the RAM filesystem.
+- Rusa Workbench is a standalone GUI app for `.rusa` language work, with tabs for examples, keywords, docs, check, run, and diagnostics.
+- Rusa Workbench's Open Terminal button runs the command matching the selected tab.
+- Screensavers can run as animated desktop backdrops with `gui backdrop lava|rain|stars|waves|off`.
+- The Screensaver app exposes visible Lava, Rain, Stars, Waves, Preview, and Off controls.
+- `fb status` reports `hardware=on` with the framebuffer address and pitch when GRUB provides the pixel buffer.
+- GUI desktop icons are wired to real app focus/open behavior rather than decorative panels.
+- Clicking Terminal or the taskbar Start/Term button requests the shell; clicking other desktop icons opens their GUI app window and launches the matching terminal command.
+- VGA text output still exists for debugging and fallback, but the first boot surface is now the pixel desktop.
 - Vector graphics command surface supports line, rect, circle, and a sample scene.
 - Framebuffer layer now has an in-memory soft raster plane backing pixel, rectangle, text, GUI, and screensaver output.
 - The logical framebuffer mode remains configurable while the debug raster is stored as a compact 96x54 pixel plane.
 - Soft text rendering exists through `fb text` and `fb_draw_text`.
-- `gui start` rasterizes the desktop layout into the framebuffer before drawing the text-mode desktop.
+- `gui start` and `gui desktop` rasterize the desktop layout into the hardware framebuffer when available.
+- `gui desktop` enters the GUI-first desktop mode and hides the terminal prompt.
 - `fb demo` draws a GUI desktop preview into the raster.
 - `fb dump [W H]` prints an ASCII luminance preview of the current raster.
 - `fb saver lava|rain|stars|waves [N]` advances soothing screensaver frame generators.
 - `fb blit` reports the current raster checksum, standing in for compositing to a physical primary buffer.
 - Mouse input subsystem tracks crosshair position, buttons, event count, and a light IRQ12 packet path.
-- `mouse set/move/click/down/up/status` drives the GUI pointer in testable form.
-- The framebuffer dump overlays the pointer as a crosshair instead of an arrow cursor.
-- `gui click X Y` routes a click through the mouse layer and focuses the matching desktop quadrant/window.
-- Remaining work: real multiboot framebuffer address discovery, hardware pixel plotting, fuller PS/2 mouse initialization, dirty rectangles, and real window surface compositing.
+- Mouse input now attempts PS/2 wheel mode with ACK-draining setup and maps wheel/touchpad scrolls into terminal scrollback.
+- PS/2 setup enables AUX IRQs through the controller config byte before unmasking IRQ12.
+- `mouse set/move/click/down/up/status/scroll/wheel` drives the GUI pointer and terminal scroll in testable form.
+- The pixel desktop, VGA fallback, and framebuffer dump overlay the pointer as a crosshair instead of an arrow cursor.
+- Cursor movement saves the exact hardware pixels under the crosshair and restores them before the next draw, preventing repeated cursor images/trails.
+- `gui click X Y` routes a click through the mouse layer and focuses the matching desktop app/window.
+- GUI click routing now uses real icon/taskbar hitboxes for Files, Terminal, Math, Rusa, Settings, Tasks, Network, and Saver.
+- GUI and network services are now started by the full-stack boot path so the desktop is present immediately.
+- Remaining work: dirty rectangles, real window surface compositing, graphical terminal widget, richer app launch actions, and USB tablet support.
 
 Examples:
 
@@ -258,6 +409,8 @@ gui move editor 4 8
 gui click 500 120
 window list
 mouse status
+mouse scroll up 2
+mouse scroll down 2
 mouse set 160 120
 mouse click
 gfx line 0 0 12 8
@@ -293,6 +446,8 @@ fb blit
 - `net stats` reports tx/rx/drops/checksum errors/state changes.
 - `net socket` allocates a file descriptor for the socket.
 - `fd write SOCKET_FD MSG` and `fd read SOCKET_FD` operate on socket descriptors in the owning process table.
+- Network privacy gates block socket/open/send/connect actions when the master privacy or network switch is off.
+- DDoS hardening surface includes `net shield`, `net mask`, flood scores per socket, automatic port close after repeated connection/send patterns, and masked IP display by default.
 - Remaining work: real NIC driver, ARP cache mutation, ICMP packets, TCP retransmit/window handling, packet ring buffers, and external network I/O.
 
 Examples:
@@ -317,12 +472,19 @@ net trace
 net stats
 net flush
 net sockets
+privacy status
+net shield status
+net shield mask off
 ```
 
 ## Security
 
 - Users, capabilities, secure mode, audit log, and namespace write checks exist.
 - Kernel-facing packages are blocked in secure mode.
+- Privacy center provides layperson-facing connection controls: master privacy, network access, device access, telemetry, cookie policy, port review, connection review, and program accounting.
+- `privacy off` disconnects network sockets, stops the network service, and leaves connection state visible for review.
+- `privacy cookies block|ask|allow` records simple high-level cookie policy.
+- Rusa source security scanning catches risky control/network/filesystem patterns before source execution.
 - Remaining work: enforce security through all object paths, per-process credentials, signed packages, and syscall boundary.
 
 Examples:
@@ -336,6 +498,15 @@ security audit
 security unlock
 pkg install gui-core
 security lock
+privacy status
+privacy off
+privacy on
+privacy network off
+privacy network on
+privacy cookies ask
+privacy ports
+privacy connections
+lang scan /home/projects/app.rusa
 ```
 
 ## Package Manager
@@ -434,6 +605,8 @@ The `test` command now checks the major non-interactive surfaces:
 
 ```text
 console
+console scrollback
+mousepad terminal scroll
 timer/memory/paging
 filesystem and file descriptors
 per-process descriptor count
@@ -442,7 +615,9 @@ object dispatcher
 scheduler yield
 scheduler context switch
 framebuffer descriptor and raster
+hardware framebuffer
 mouse crosshair input
+GUI icon launch request
 vector/network descriptors
 network packet queue
 block device descriptor
@@ -450,6 +625,8 @@ Rusa docs and stdlib
 Rusa source stdlib
 Rusa source runtime
 Rusa diagnostics
+Rusa nswitch
+Rusa security scan
 Rusa persistent events
 Rusa object docs
 security mode
@@ -457,8 +634,39 @@ security mode
 
 Some graphical commands such as `gui start` and `gfx scene` intentionally redraw the text desktop. The selftest now checks the framebuffer descriptor and raster checksum directly, while screen-clearing paths remain smoke-tested manually.
 
+Latest GUI smoke checks:
+
+```text
+gui app files
+gui app editor
+gui app math
+gui app privacy
+gui app net
+gui app tasks
+gui app settings
+gui click 60 95
+gui click 60 295
+gui click 60 495
+gui editor code
+gui editor save
+gui rusa docs
+gui backdrop rain
+gui click 960 94
+gui status
+fb status
+gui cursor cross
+gui cursor dot
+gui backdrop waves
+gui close editor
+gui saver rain
+GUI desktop key 5 + Enter -> tree /home
+GUI icon click -> launch request for tree /home
+GUI icon click -> app window, Open Terminal button -> command launch request
+Enter -> framebuffer terminal -> pwd/lang examples/edit works
+```
+
 Latest QEMU selftest result:
 
 ```text
-selftest pass=37 fail=0
+selftest pass=51 fail=0
 ```

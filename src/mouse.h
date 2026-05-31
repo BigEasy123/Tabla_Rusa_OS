@@ -9,10 +9,13 @@ void mouse_handler(void);
 void mouse_move(int dx, int dy);
 void mouse_set(int x, int y);
 void mouse_button(uint32_t button, int down);
+void mouse_scroll(int amount);
 uint32_t mouse_x(void);
 uint32_t mouse_y(void);
 uint32_t mouse_buttons(void);
 uint32_t mouse_event_count(void);
+int32_t mouse_wheel(void);
+uint32_t mouse_scroll_count(void);
 void mouse_cmd(char* arg);
 
 #endif

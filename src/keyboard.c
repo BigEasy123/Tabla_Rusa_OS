@@ -59,6 +59,8 @@ void keyboard_handler(void) {
         else if(sc == 0x50) key = KB_KEY_DOWN;
         else if(sc == 0x4B) key = KB_KEY_LEFT;
         else if(sc == 0x4D) key = KB_KEY_RIGHT;
+        else if(sc == 0x49) key = KB_KEY_PAGE_UP;
+        else if(sc == 0x51) key = KB_KEY_PAGE_DOWN;
         if(key && kb_len < 127)
             kb_buffer[kb_len++] = key;
         return;

@@ -14,7 +14,7 @@ SRC_S := src/boot.S src/isr.S
 OBJ := $(patsubst src/%.c,$(BUILD)/%.o,$(SRC_C)) \
        $(patsubst src/%.S,$(BUILD)/%.o,$(SRC_S))
 
-.PHONY: all clean iso run
+.PHONY: all clean iso run run-gui run-gtk run-sdl run-text
 
 all: $(BUILD)/kernel.elf
 
@@ -41,7 +41,17 @@ iso: all
 	@echo "}" >> $(ISO_DIR)/boot/grub/grub.cfg
 	grub-mkrescue -o myos.iso $(ISO_DIR)
 
-run: iso
+run: run-sdl
+
+run-gui: run-sdl
+
+run-sdl: iso
+	qemu-system-i386 -cdrom myos.iso -display sdl -vga std -serial file:serial.log
+
+run-gtk: iso
+	qemu-system-i386 -cdrom myos.iso -display gtk -vga std -serial file:serial.log
+
+run-text: iso
 	qemu-system-i386 -cdrom myos.iso -display curses -serial file:serial.log
 
 clean:

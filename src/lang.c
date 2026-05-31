@@ -10,6 +10,7 @@
 #define RUSA_VAR_MAX 32
 #define RUSA_FN_MAX 16
 #define RUSA_PARAM_MAX 4
+#define RUSA_DIM_MAX 8
 #define RUSA_TEXT_MAX 96
 #define RUSA_BODY_MAX 384
 #define RUSA_IMPORT_DEPTH 4
@@ -234,6 +235,120 @@ static void diag_clear(void){
     last_diag.source_line[0] = 0;
 }
 
+static const char* find_ci_span(const char* start, const char* end, const char* needle){
+    for(const char* p = start; p < end; p++){
+        const char* a = p;
+        const char* b = needle;
+        while(a < end && *b && lower_char(*a) == lower_char(*b)){
+            a++;
+            b++;
+        }
+        if(*b == 0)
+            return p;
+    }
+    return 0;
+}
+
+static int scan_rule(const char* start, const char* end, const char* needle,
+                     const char** hit, const char** title, const char** detail, const char** hint){
+    const char* found = find_ci_span(start, end, needle);
+    if(!found)
+        return 0;
+    *hit = found;
+    if(str_eq(needle, "privacy off") || str_eq(needle, "privacy network off")){
+        *title = "privacy switch change";
+        *detail = "This line turns off a privacy or network control. That may disconnect protection or hide useful connection status.";
+        *hint = "Keep privacy controls on unless this is an explicit maintenance script.";
+    } else if(str_eq(needle, "security unlock") || str_eq(needle, "service stop security")){
+        *title = "security protection change";
+        *detail = "This line weakens the security service or secure mode.";
+        *hint = "Use security lock for normal scripts, and only unlock manually at the shell.";
+    } else if(str_eq(needle, "while true")){
+        *title = "possible endless loop";
+        *detail = "This loop can run forever and tie up a job slot.";
+        *hint = "Use a counter, an event trigger, or repeat N when the loop has a clear limit.";
+    } else if(str_eq(needle, "repeat 1000") || str_eq(needle, "repeat 9999")){
+        *title = "large repeat count";
+        *detail = "This repeat count is large enough to look like accidental or hostile resource use.";
+        *hint = "Use a smaller test count or schedule it as a compute job.";
+    } else if(str_eq(needle, "rm /") || str_eq(needle, "write /system") || str_eq(needle, "write /boot")){
+        *title = "dangerous filesystem operation";
+        *detail = "This line tries to remove or overwrite a sensitive system path.";
+        *hint = "Write inside /home or /tmp, and use package manifests for system changes.";
+    } else if(str_eq(needle, "net send")){
+        *title = "network send";
+        *detail = "This line sends network data. The privacy center can account for it, but scripts should be explicit about network use.";
+        *hint = "Run privacy status and net sockets to review what will connect.";
+    } else {
+        *title = "suspicious command";
+        *detail = "This line contains a command that deserves review before running.";
+        *hint = "Read the line carefully or open it with lang open-error.";
+    }
+    return 1;
+}
+
+static uint32_t lang_security_scan(const char* source, const char* origin, int print, int set_diag){
+    const char* rules[] = {
+        "privacy off",
+        "privacy network off",
+        "security unlock",
+        "service stop security",
+        "while true",
+        "repeat 1000",
+        "repeat 9999",
+        "rm /",
+        "write /system",
+        "write /boot",
+        "net send",
+        0
+    };
+    const char* line = source;
+    uint32_t issues = 0;
+    current_source = source;
+    current_origin = origin ? origin : "<inline>";
+    while(line && *line){
+        const char* end = line;
+        const char* p = line;
+        while(*end && *end != '\n') end++;
+        while(p < end && is_space(*p)) p++;
+        if(p < end && *p != '#'){
+            for(size_t r=0; rules[r]; r++){
+                const char* hit = 0;
+                const char* title = 0;
+                const char* detail = 0;
+                const char* hint = 0;
+                if(scan_rule(p, end, rules[r], &hit, &title, &detail, &hint)){
+                    uint32_t line_no, col;
+                    issues++;
+                    diag_location(hit, &line_no, &col);
+                    if(set_diag && !last_diag.active)
+                        diag_set(hit, title, detail, hint);
+                    if(print){
+                        console_puts("security scan: ");
+                        console_puts(current_origin);
+                        console_putc(':');
+                        console_write_dec(line_no);
+                        console_putc(':');
+                        console_write_dec(col);
+                        console_puts(" - ");
+                        console_puts(title);
+                        console_puts("\n  ");
+                        console_puts(detail);
+                        console_putc('\n');
+                    }
+                }
+            }
+        }
+        line = *end == '\n' ? end + 1 : end;
+    }
+    if(print && issues){
+        console_puts("security scan issues=");
+        console_write_dec(issues);
+        console_putc('\n');
+    }
+    return issues;
+}
+
 static struct rusa_value value_int(int32_t n){
     struct rusa_value v;
     v.type = RUSA_INT;
@@ -261,6 +376,12 @@ static struct rusa_value value_string(const char* s){
 static int value_truth(struct rusa_value v){
     if(v.type == RUSA_STRING) return v.text[0] != 0;
     return v.number != 0;
+}
+
+static int value_same(struct rusa_value a, struct rusa_value b){
+    if(a.type == RUSA_STRING || b.type == RUSA_STRING)
+        return str_eq(a.text, b.text);
+    return a.number == b.number;
 }
 
 static void value_print(struct rusa_value v){
@@ -477,6 +598,59 @@ static struct rusa_value eval_expr(const char* expr){
     struct rusa_value out = value_int(0);
     parse_compare(expr, &out);
     return out;
+}
+
+static uint32_t eval_value_list(const char* exprs, struct rusa_value* values, uint32_t max){
+    const char* p = exprs;
+    uint32_t count = 0;
+    while(*p && count < max){
+        const char* start = p;
+        int quoted = 0;
+        int paren = 0;
+        while(*p){
+            if(*p == '"') quoted = !quoted;
+            else if(!quoted && *p == '(') paren++;
+            else if(!quoted && *p == ')' && paren) paren--;
+            else if(!quoted && paren == 0 && *p == ',') break;
+            p++;
+        }
+        char part[96];
+        copy_span(part, sizeof(part), start, p);
+        trim_in_place(part);
+        values[count++] = eval_expr(part);
+        if(*p == ',') p++;
+        p = skip_ws(p);
+    }
+    return count;
+}
+
+static int nswitch_case_matches(const char* pattern, struct rusa_value* dims, uint32_t dim_count){
+    const char* p = pattern;
+    uint32_t index = 0;
+    while(index < dim_count){
+        const char* start = p;
+        int quoted = 0;
+        int paren = 0;
+        while(*p){
+            if(*p == '"') quoted = !quoted;
+            else if(!quoted && *p == '(') paren++;
+            else if(!quoted && *p == ')' && paren) paren--;
+            else if(!quoted && paren == 0 && *p == ',') break;
+            p++;
+        }
+        char part[96];
+        copy_span(part, sizeof(part), start, p);
+        trim_in_place(part);
+        if(!str_eq(part, "*")){
+            struct rusa_value candidate = eval_expr(part);
+            if(!value_same(candidate, dims[index]))
+                return 0;
+        }
+        index++;
+        if(*p == ',') p++;
+        p = skip_ws(p);
+    }
+    return index == dim_count;
 }
 
 static struct rusa_value call_function(const char* name, const char* args){
@@ -699,7 +873,7 @@ static int eval_statement(char* statement, const char* source_pos){
         if(name[0]){
             diag_set(source_pos, "unknown statement",
                      "Rusa does not know how to run this line as a keyword, function, or OS object.",
-                     "Try one of: let, set, print, fn, if, while, repeat, call, run, on, or file[\"...\"]");
+                     "Try one of: let, set, print, fn, if, while, repeat, nswitch, call, run, on, or file[\"...\"]");
             return 1;
         }
     }
@@ -725,6 +899,59 @@ static void parse_params(struct rusa_fn* fn, const char* start, const char* end)
     }
 }
 
+static void eval_nswitch(const char* header, const char* body, const char* source_pos){
+    struct rusa_value dims[RUSA_DIM_MAX];
+    char default_body[RUSA_BODY_MAX];
+    uint32_t dim_count = eval_value_list(header + 7, dims, RUSA_DIM_MAX);
+    const char* p = body;
+    default_body[0] = 0;
+    if(dim_count == 0){
+        diag_set(source_pos, "empty nswitch",
+                 "An n-dimensional switch needs one or more values to compare.",
+                 "Use: nswitch x, y { case 1, 2 { print \"hit\" } default { print \"miss\" } }");
+        return;
+    }
+    while(*p && !runtime.returning && !diag_has()){
+        p = skip_ws(p);
+        if(*p == 0) break;
+        const char* brace = find_top_brace(p);
+        if(!brace){
+            diag_set(p, "missing case block",
+                     "Each nswitch case needs a braced body.",
+                     "Use: case 1, * { print \"matched\" }");
+            return;
+        }
+        const char* close = find_matching(brace, '{', '}');
+        if(!close){
+            diag_set(brace, "missing case closing brace",
+                     "Rusa found a case body, but not the matching closing brace.",
+                     "Add '}' after the case body.");
+            return;
+        }
+        char case_header[128];
+        char case_body[RUSA_BODY_MAX];
+        copy_span(case_header, sizeof(case_header), p, brace);
+        trim_in_place(case_header);
+        copy_span(case_body, sizeof(case_body), brace + 1, close);
+        if(str_starts_kw(case_header, "case")){
+            if(nswitch_case_matches(case_header + 4, dims, dim_count)){
+                eval_block(case_body);
+                return;
+            }
+        } else if(str_starts_kw(case_header, "default")){
+            copy_text(default_body, sizeof(default_body), case_body);
+        } else {
+            diag_set(p, "unknown nswitch arm",
+                     "Inside nswitch, Rusa expects case or default.",
+                     "Use: case 1, * { ... } or default { ... }");
+            return;
+        }
+        p = close + 1;
+    }
+    if(default_body[0])
+        eval_block(default_body);
+}
+
 static const char* eval_braced_statement(const char* p){
     const char* brace = find_top_brace(p);
     const char* close;
@@ -746,7 +973,9 @@ static const char* eval_braced_statement(const char* p){
     copy_span(header, sizeof(header), p, brace);
     trim_in_place(header);
     copy_span(body, sizeof(body), brace + 1, close);
-    if(str_starts_kw(header, "if")){
+    if(str_starts_kw(header, "nswitch")){
+        eval_nswitch(header, body, p);
+    } else if(str_starts_kw(header, "if")){
         char cond[96];
         copy_text(cond, sizeof(cond), header + 2);
         trim_in_place(cond);
@@ -824,7 +1053,7 @@ static const char* eval_braced_statement(const char* p){
     } else {
         diag_set(p, "unknown block",
                  "This looks like a block, but Rusa does not recognize the keyword before it.",
-                 "Use if, while, repeat, fn, on, or parallel before a brace block.");
+                 "Use if, while, repeat, nswitch, fn, on, or parallel before a brace block.");
     }
     return close + 1;
 }
@@ -835,6 +1064,7 @@ static int eval_block(const char* source){
         p = skip_ws(p);
         if(*p == 0) break;
         if(str_starts_kw(p, "if") || str_starts_kw(p, "while") || str_starts_kw(p, "repeat") ||
+           str_starts_kw(p, "nswitch") ||
            str_starts_kw(p, "fn") || str_starts_kw(p, "on") || str_starts_kw(p, "parallel")){
             p = eval_braced_statement(p);
             continue;
@@ -948,6 +1178,10 @@ int lang_run_source(const char* source, const char* origin, const char* args){
         diag_print();
         return -1;
     }
+    if(lang_security_scan(source, current_origin, 1, 1) != 0){
+        console_puts("rusa security: stopped before running. Review the line above or use lang open-error.\n");
+        return -1;
+    }
     while(*p){
         p = skip_ws(p);
         if(str_starts_kw(p, "import")){
@@ -1003,11 +1237,11 @@ void lang_init(void){
     fs_mkdir("/lib/rusa");
     fs_write("/share/rusa/README",
         "Rusa is the native Tabla Rusa OS language.\n"
-        "It uses readable statements with braces for blocks, typed values, functions, loops, imports, and OS objects.\n"
+        "It uses readable statements with braces for blocks, typed values, functions, loops, n-dimensional switch blocks, imports, and OS objects.\n"
         "Source files use .rusa. TRX remains the lower-level bytecode format.\n"
         "Diagnostics show plain-English errors with line, column, source highlight, and lang open-error.\n");
     fs_write("/share/rusa/keywords",
-        "import\nlet\nset\nfn\nreturn\nif\nelse\nwhile\nrepeat\nparallel\non\nrun\ncall\nprint\ntrue\nfalse\n"
+        "import\nlet\nset\nfn\nreturn\nif\nelse\nwhile\nrepeat\nnswitch\ncase\ndefault\nparallel\non\nrun\ncall\nprint\ntrue\nfalse\n"
         "file\nprocess\nservice\nwindow\nprogram\nmath\nphys\n");
     fs_write("/share/rusa/examples",
         "import std\n"
@@ -1020,6 +1254,13 @@ void lang_init(void){
         "  print \"hello \" + name\n"
         "}\n"
         "call greet(\"tabla\")\n"
+        "let x: int = 1\n"
+        "let y: int = 2\n"
+        "nswitch x, y {\n"
+        "  case 1, 2 { print \"matched point\" }\n"
+        "  case 1, * { print \"matched row\" }\n"
+        "  default { print \"no match\" }\n"
+        "}\n"
         "on \"fs.write\" { print \"filesystem changed\" }\n"
         "file[\"/home/readme.txt\"].read()\n");
     fs_write("/share/rusa/diagnostics",
@@ -1028,7 +1269,13 @@ void lang_init(void){
         "lang run /home/projects/app.rusa\n"
         "lang last-error\n"
         "lang open-error\n"
+        "lang scan /home/projects/app.rusa\n"
         "Errors include where, plain english, source, caret, and an editor jump command.\n");
+    fs_write("/share/rusa/security-scan",
+        "Rusa security scan:\n"
+        "lang scan PATH reads every source line and points out risky patterns before code runs.\n"
+        "It looks for privacy toggles, security unlocks, endless loops, large repeat counts, dangerous system writes, and network sends.\n"
+        "When lang run finds a risky line, it stops and keeps lang open-error pointed at the first issue.\n");
     fs_write("/share/rusa/objects",
         "file: read exists open write\n"
         "process: trace stop\n"
@@ -1104,6 +1351,24 @@ void lang_cmd(char* arg){
             if(result == 0) console_puts("rusa check: ok\n");
             else if(result == -2) console_puts("rusa: source not found\n");
         }
+    } else if(str_eq(action, "scan")){
+        const char* path = first_arg(rest, &rest);
+        const char* text;
+        if(path[0] == 0){
+            console_puts("usage: lang scan PATH\n");
+        } else if(fs_read(path, &text) != 0){
+            console_puts("scan: source not found\n");
+        } else {
+            diag_clear();
+            current_source = text;
+            current_origin = path;
+            if(lang_preflight(text) == 0){
+                uint32_t issues = lang_security_scan(text, path, 1, 1);
+                if(issues == 0) console_puts("security scan: no suspicious lines found\n");
+            } else {
+                diag_print();
+            }
+        }
     } else if(str_eq(action, "eval")){
         lang_run_source(rest, "<eval>", "");
     } else if(str_eq(action, "last-error") || str_eq(action, "diag")){
@@ -1130,6 +1395,6 @@ void lang_cmd(char* arg){
             console_puts(": see /share/rusa/objects\n");
         }
     } else {
-        console_puts("usage: lang about | keywords | examples | docs | stdlib | std | import NAME | run/check PATH | eval SOURCE | last-error | open-error | object [NAME]\n");
+        console_puts("usage: lang about | keywords | examples | docs | stdlib | std | import NAME | run/check/scan PATH | eval SOURCE | last-error | open-error | object [NAME]\n");
     }
 }

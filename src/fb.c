@@ -3,9 +3,18 @@
 #include "fb.h"
 #include "fs.h"
 #include "jobs.h"
+#include "paging.h"
 
 #define FB_RASTER_W 96
 #define FB_RASTER_H 54
+#define MB2_TAG_FRAMEBUFFER 8
+#define CURSOR_BACK_MAX 96
+
+struct cursor_back_pixel {
+    uint32_t x;
+    uint32_t y;
+    uint32_t color;
+};
 
 struct fb_state {
     uint32_t width;
@@ -16,13 +25,39 @@ struct fb_state {
     uint32_t rects;
     uint32_t glyphs;
     uint32_t frames;
+    uint32_t hw_addr;
+    uint32_t hw_pitch;
+    uint32_t hw_type;
+    int hw_ready;
     int mouse_x;
     int mouse_y;
+    int old_mouse_x;
+    int old_mouse_y;
 };
 
-static struct fb_state fb = {640, 480, 32, 3, 0, 0, 0, 0, 32, 24};
+static struct fb_state fb = {640, 480, 32, 3, 0, 0, 0, 0, 0, 0, 0, 0, 32, 24, -1, -1};
 static uint32_t raster[FB_RASTER_H][FB_RASTER_W];
 static char saver_name[16] = "none";
+static char cursor_style[16] = "dot";
+static struct cursor_back_pixel cursor_back[CURSOR_BACK_MAX];
+static uint32_t cursor_back_count = 0;
+
+struct mb2_tag {
+    uint32_t type;
+    uint32_t size;
+} __attribute__((packed));
+
+struct mb2_framebuffer_tag {
+    uint32_t type;
+    uint32_t size;
+    uint64_t addr;
+    uint32_t pitch;
+    uint32_t width;
+    uint32_t height;
+    uint8_t bpp;
+    uint8_t fb_type;
+    uint16_t reserved;
+} __attribute__((packed));
 
 static char lower_char(char c){
     return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c;
@@ -64,6 +99,95 @@ static uint32_t parse_u32(const char* s){
     return value;
 }
 
+static uint32_t align8(uint32_t value){
+    return (value + 7U) & ~7U;
+}
+
+static uint32_t color32(uint32_t color){
+    uint32_t v = color & 0xFF;
+    if(color > 0xFF)
+        return color;
+    return (v << 16) | (v << 8) | v;
+}
+
+static void hw_put_pixel(uint32_t x, uint32_t y, uint32_t color){
+    if(!fb.hw_ready || fb.bpp != 32 || x >= fb.width || y >= fb.height)
+        return;
+    uint32_t* px = (uint32_t*)(fb.hw_addr + y * fb.hw_pitch + x * 4);
+    *px = color32(color);
+}
+
+static uint32_t hw_get_pixel(uint32_t x, uint32_t y){
+    if(!fb.hw_ready || fb.bpp != 32 || x >= fb.width || y >= fb.height)
+        return 0;
+    uint32_t* px = (uint32_t*)(fb.hw_addr + y * fb.hw_pitch + x * 4);
+    return *px;
+}
+
+static void cursor_restore(void){
+    for(uint32_t i=0; i<cursor_back_count; i++)
+        hw_put_pixel(cursor_back[i].x, cursor_back[i].y, cursor_back[i].color);
+    cursor_back_count = 0;
+}
+
+static void cursor_save_pixel(uint32_t x, uint32_t y){
+    if(cursor_back_count >= CURSOR_BACK_MAX || x >= fb.width || y >= fb.height)
+        return;
+    for(uint32_t i=0; i<cursor_back_count; i++)
+        if(cursor_back[i].x == x && cursor_back[i].y == y)
+            return;
+    cursor_back[cursor_back_count].x = x;
+    cursor_back[cursor_back_count].y = y;
+    cursor_back[cursor_back_count].color = hw_get_pixel(x, y);
+    cursor_back_count++;
+}
+
+static void cursor_save_region(uint32_t x, uint32_t y){
+    if(!fb.hw_ready || fb.bpp != 32)
+        return;
+    for(int d=-12; d<=12; d++){
+        int px = (int)x + d;
+        int py = (int)y + d;
+        if(px >= 0 && px < (int)fb.width)
+            cursor_save_pixel((uint32_t)px, y);
+        if(py >= 0 && py < (int)fb.height)
+            cursor_save_pixel(x, (uint32_t)py);
+    }
+    for(int oy=-3; oy<=3; oy++){
+        for(int ox=-3; ox<=3; ox++){
+            int px = (int)x + ox;
+            int py = (int)y + oy;
+            if(px >= 0 && px < (int)fb.width && py >= 0 && py < (int)fb.height)
+                cursor_save_pixel((uint32_t)px, (uint32_t)py);
+        }
+    }
+}
+
+static void hw_draw_cursor(uint32_t x, uint32_t y, uint32_t buttons){
+    uint32_t cross = buttons ? 0xFF4040 : 0xFFFFFF;
+    uint32_t center = 0x000000;
+    for(int d=-12; d<=12; d++){
+        int px = (int)x + d;
+        int py = (int)y + d;
+        if(px >= 0 && px < (int)fb.width)
+            hw_put_pixel((uint32_t)px, y, cross);
+        if(py >= 0 && py < (int)fb.height)
+            hw_put_pixel(x, (uint32_t)py, cross);
+    }
+    if(str_eq(cursor_style, "dot") || str_eq(cursor_style, "target")){
+        for(int oy=-3; oy<=3; oy++){
+            for(int ox=-3; ox<=3; ox++){
+                if(ox * ox + oy * oy > 10)
+                    continue;
+                int px = (int)x + ox;
+                int py = (int)y + oy;
+                if(px >= 0 && px < (int)fb.width && py >= 0 && py < (int)fb.height)
+                    hw_put_pixel((uint32_t)px, (uint32_t)py, center);
+            }
+        }
+    }
+}
+
 static void copy_text(char* dst, const char* src, uint32_t max){
     uint32_t i = 0;
     if(max == 0) return;
@@ -78,6 +202,17 @@ void fb_clear(uint32_t color){
     for(uint32_t y=0; y<FB_RASTER_H; y++)
         for(uint32_t x=0; x<FB_RASTER_W; x++)
             raster[y][x] = color;
+    if(fb.hw_ready && fb.bpp == 32){
+        uint32_t c = color32(color);
+        for(uint32_t y=0; y<fb.height; y++){
+            uint32_t* row = (uint32_t*)(fb.hw_addr + y * fb.hw_pitch);
+            for(uint32_t x=0; x<fb.width; x++)
+                row[x] = c;
+        }
+    }
+    fb.old_mouse_x = -1;
+    fb.old_mouse_y = -1;
+    cursor_back_count = 0;
 }
 
 void fb_put_pixel(uint32_t x, uint32_t y, uint32_t color){
@@ -89,6 +224,7 @@ void fb_put_pixel(uint32_t x, uint32_t y, uint32_t color){
     if(rx >= FB_RASTER_W) rx = FB_RASTER_W - 1;
     if(ry >= FB_RASTER_H) ry = FB_RASTER_H - 1;
     raster[ry][rx] = color;
+    hw_put_pixel(x, y, color);
     fb.pixels++;
 }
 
@@ -102,12 +238,78 @@ void fb_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color
     fb.rects++;
 }
 
+static uint8_t glyph_row(char c, uint32_t row){
+    static const uint8_t digits[10][7] = {
+        {0x0E,0x11,0x13,0x15,0x19,0x11,0x0E},
+        {0x04,0x0C,0x04,0x04,0x04,0x04,0x0E},
+        {0x0E,0x11,0x01,0x02,0x04,0x08,0x1F},
+        {0x1F,0x02,0x04,0x02,0x01,0x11,0x0E},
+        {0x02,0x06,0x0A,0x12,0x1F,0x02,0x02},
+        {0x1F,0x10,0x1E,0x01,0x01,0x11,0x0E},
+        {0x06,0x08,0x10,0x1E,0x11,0x11,0x0E},
+        {0x1F,0x01,0x02,0x04,0x08,0x08,0x08},
+        {0x0E,0x11,0x11,0x0E,0x11,0x11,0x0E},
+        {0x0E,0x11,0x11,0x0F,0x01,0x02,0x0C}
+    };
+    static const uint8_t letters[26][7] = {
+        {0x0E,0x11,0x11,0x1F,0x11,0x11,0x11},
+        {0x1E,0x11,0x11,0x1E,0x11,0x11,0x1E},
+        {0x0E,0x11,0x10,0x10,0x10,0x11,0x0E},
+        {0x1E,0x11,0x11,0x11,0x11,0x11,0x1E},
+        {0x1F,0x10,0x10,0x1E,0x10,0x10,0x1F},
+        {0x1F,0x10,0x10,0x1E,0x10,0x10,0x10},
+        {0x0E,0x11,0x10,0x17,0x11,0x11,0x0F},
+        {0x11,0x11,0x11,0x1F,0x11,0x11,0x11},
+        {0x0E,0x04,0x04,0x04,0x04,0x04,0x0E},
+        {0x07,0x02,0x02,0x02,0x12,0x12,0x0C},
+        {0x11,0x12,0x14,0x18,0x14,0x12,0x11},
+        {0x10,0x10,0x10,0x10,0x10,0x10,0x1F},
+        {0x11,0x1B,0x15,0x15,0x11,0x11,0x11},
+        {0x11,0x19,0x15,0x13,0x11,0x11,0x11},
+        {0x0E,0x11,0x11,0x11,0x11,0x11,0x0E},
+        {0x1E,0x11,0x11,0x1E,0x10,0x10,0x10},
+        {0x0E,0x11,0x11,0x11,0x15,0x12,0x0D},
+        {0x1E,0x11,0x11,0x1E,0x14,0x12,0x11},
+        {0x0F,0x10,0x10,0x0E,0x01,0x01,0x1E},
+        {0x1F,0x04,0x04,0x04,0x04,0x04,0x04},
+        {0x11,0x11,0x11,0x11,0x11,0x11,0x0E},
+        {0x11,0x11,0x11,0x11,0x11,0x0A,0x04},
+        {0x11,0x11,0x11,0x15,0x15,0x15,0x0A},
+        {0x11,0x11,0x0A,0x04,0x0A,0x11,0x11},
+        {0x11,0x11,0x0A,0x04,0x04,0x04,0x04},
+        {0x1F,0x01,0x02,0x04,0x08,0x10,0x1F}
+    };
+    if(row >= 7) return 0;
+    if(c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+    if(c >= '0' && c <= '9') return digits[c - '0'][row];
+    if(c >= 'A' && c <= 'Z') return letters[c - 'A'][row];
+    switch(c){
+        case ' ': return 0;
+        case '.': return row == 6 ? 0x04 : 0;
+        case ',': return row == 5 ? 0x04 : (row == 6 ? 0x08 : 0);
+        case ':': return row == 2 || row == 5 ? 0x04 : 0;
+        case ';': return row == 2 ? 0x04 : (row == 5 ? 0x04 : (row == 6 ? 0x08 : 0));
+        case '-': return row == 3 ? 0x1F : 0;
+        case '_': return row == 6 ? 0x1F : 0;
+        case '/': return 0x01 << (4 - row > 4 ? 0 : (4 - row));
+        case '\\': return row < 5 ? (0x10 >> row) : 0x01;
+        case '|': return 0x04;
+        case '+': return row == 3 ? 0x1F : (row >= 1 && row <= 5 ? 0x04 : 0);
+        case '=': return row == 2 || row == 4 ? 0x1F : 0;
+        case '$': return row == 0 ? 0x04 : (row == 1 ? 0x0F : (row == 2 ? 0x14 : (row == 3 ? 0x0E : (row == 4 ? 0x05 : (row == 5 ? 0x1E : 0x04)))));
+        case '[': return row == 0 || row == 6 ? 0x0E : 0x08;
+        case ']': return row == 0 || row == 6 ? 0x0E : 0x02;
+        case '(': return row == 0 || row == 6 ? 0x02 : 0x04;
+        case ')': return row == 0 || row == 6 ? 0x08 : 0x04;
+        case '<': return row < 3 ? (0x02 << row) : (row <= 5 ? (0x10 >> (row - 3)) : 0);
+        case '>': return row < 3 ? (0x08 >> row) : (row <= 5 ? (0x02 << (row - 3)) : 0);
+        default: return row == 0 || row == 6 ? 0x1F : 0x11;
+    }
+}
+
 static uint8_t glyph_pixel(char c, uint32_t gx, uint32_t gy){
-    uint32_t seed = (uint32_t)c;
-    if(c == ' ') return 0;
-    if(gx == 0 || gx == 4 || gy == 0 || gy == 6)
-        return 1;
-    return ((seed + gx * 3 + gy * 5) & 0x5) == 0;
+    uint8_t row = glyph_row(c, gy);
+    return (row & (uint8_t)(0x10 >> gx)) != 0;
 }
 
 void fb_draw_text(uint32_t x, uint32_t y, const char* text, uint32_t color){
@@ -128,9 +330,25 @@ void fb_draw_text(uint32_t x, uint32_t y, const char* text, uint32_t color){
 }
 
 void fb_set_mouse(uint32_t x, uint32_t y, uint32_t buttons){
+    if(x >= fb.width) x = fb.width ? fb.width - 1 : 0;
+    if(y >= fb.height) y = fb.height ? fb.height - 1 : 0;
+    cursor_restore();
     fb.mouse_x = (int)x;
     fb.mouse_y = (int)y;
-    (void)buttons;
+    fb.old_mouse_x = (int)x;
+    fb.old_mouse_y = (int)y;
+    cursor_save_region(x, y);
+    hw_draw_cursor(x, y, buttons);
+}
+
+void fb_set_cursor_style(const char* style){
+    if(style && (str_eq(style, "cross") || str_eq(style, "dot") || str_eq(style, "target")))
+        copy_text(cursor_style, style, sizeof(cursor_style));
+    fb_set_mouse((uint32_t)fb.mouse_x, (uint32_t)fb.mouse_y, 0);
+}
+
+const char* fb_cursor_style(void){
+    return cursor_style;
 }
 
 uint32_t fb_checksum(void){
@@ -172,6 +390,19 @@ static void fb_dump_region(uint32_t max_w, uint32_t max_h){
             console_putc(cursor_at(x, y) ? '+' : shade_for(raster[y][x]));
         console_putc('\n');
     }
+}
+
+static void hw_blit_raster(void){
+    if(!fb.hw_ready || fb.bpp != 32)
+        return;
+    for(uint32_t y=0; y<fb.height; y++){
+        uint32_t ry = (y * FB_RASTER_H) / fb.height;
+        for(uint32_t x=0; x<fb.width; x++){
+            uint32_t rx = (x * FB_RASTER_W) / fb.width;
+            hw_put_pixel(x, y, raster[ry][rx]);
+        }
+    }
+    cursor_back_count = 0;
 }
 
 static uint32_t wave_value(uint32_t x, uint32_t y, uint32_t frame){
@@ -230,6 +461,7 @@ static void fb_saver(const char* name, uint32_t frames){
         jobs_account("screensaver", 4);
     }
     fb.frames += frames;
+    hw_blit_raster();
     console_puts("screensaver ");
     console_puts(saver_name);
     console_puts(" frames=");
@@ -237,6 +469,23 @@ static void fb_saver(const char* name, uint32_t frames){
     console_puts(" checksum=");
     console_write_dec(fb_checksum());
     console_putc('\n');
+}
+
+void fb_run_saver(const char* name, uint32_t frames){
+    fb_saver(name && name[0] ? name : "lava", frames);
+}
+
+void fb_draw_saver_backdrop(const char* name){
+    if(!name || !name[0])
+        name = "lava";
+    copy_text(saver_name, name, sizeof(saver_name));
+    if(str_eq(name, "lava")) saver_lava(fb.frames);
+    else if(str_eq(name, "rain")) saver_rain(fb.frames);
+    else if(str_eq(name, "stars")) saver_stars(fb.frames);
+    else if(str_eq(name, "waves")) saver_waves(fb.frames);
+    else saver_lava(fb.frames);
+    fb.frames++;
+    hw_blit_raster();
 }
 
 static void fb_draw_demo(void){
@@ -255,13 +504,51 @@ void fb_init(void){
     fb_clear(0);
     fs_mkdir("/system/gui");
     fs_write("/system/gui/framebuffer.txt",
-        "mode=640x480x32\n"
+        "mode=requested-1024x768x32\n"
         "raster=96x54\n"
+        "hardware=multiboot2-linear-framebuffer\n"
         "surfaces=3\n"
         "font=5x7-soft\n"
         "screensavers=lava,rain,stars,waves\n"
         "mouse=32,24\n");
     fs_append_line("/var/log/system.log", "fb: raster framebuffer and font renderer online");
+}
+
+void fb_bootstrap(uint32_t mb_info_addr){
+    if(mb_info_addr == 0)
+        return;
+    uint32_t total_size = *(uint32_t*)mb_info_addr;
+    uint32_t ptr = mb_info_addr + 8;
+    uint32_t end = mb_info_addr + total_size;
+    while(ptr + sizeof(struct mb2_tag) <= end){
+        struct mb2_tag* tag = (struct mb2_tag*)ptr;
+        if(tag->type == 0)
+            break;
+        if(tag->type == MB2_TAG_FRAMEBUFFER){
+            struct mb2_framebuffer_tag* fbt = (struct mb2_framebuffer_tag*)ptr;
+            if((fbt->addr >> 32) == 0 && fbt->width && fbt->height && fbt->pitch){
+                fb.hw_addr = (uint32_t)fbt->addr;
+                fb.hw_pitch = fbt->pitch;
+                fb.width = fbt->width;
+                fb.height = fbt->height;
+                fb.bpp = fbt->bpp;
+                fb.hw_type = fbt->fb_type;
+            }
+            return;
+        }
+        ptr += align8(tag->size);
+    }
+}
+
+void fb_map_hardware(void){
+    if(fb.hw_addr == 0 || fb.hw_pitch == 0 || fb.height == 0)
+        return;
+    paging_identity_map_range(fb.hw_addr, fb.hw_pitch * fb.height);
+    fb.hw_ready = 1;
+}
+
+int fb_hardware_ready(void){
+    return fb.hw_ready;
 }
 
 void fb_cmd(char* arg){
@@ -275,6 +562,14 @@ void fb_cmd(char* arg){
         console_write_dec(fb.height);
         console_putc('x');
         console_write_dec(fb.bpp);
+        console_puts(" hardware=");
+        console_puts(fb.hw_ready ? "on" : "off");
+        if(fb.hw_ready){
+            console_puts(" addr=");
+            console_write_hex(fb.hw_addr);
+            console_puts(" pitch=");
+            console_write_dec(fb.hw_pitch);
+        }
         console_puts(" raster=");
         console_write_dec(FB_RASTER_W);
         console_putc('x');
@@ -289,6 +584,8 @@ void fb_cmd(char* arg){
         console_write_dec(fb.glyphs);
         console_puts(" saver=");
         console_puts(saver_name);
+        console_puts(" cursor=");
+        console_puts(cursor_style);
         console_puts(" mouse=");
         console_write_dec((uint32_t)fb.mouse_x);
         console_putc(',');
@@ -312,6 +609,20 @@ void fb_cmd(char* arg){
     } else if(str_eq(action, "mouse")){
         fb_set_mouse(parse_u32(first_arg(rest, &rest)), parse_u32(first_arg(rest, &rest)), 0);
         console_puts("fb: crosshair moved\n");
+    } else if(str_eq(action, "cursor")){
+        const char* style = first_arg(rest, &rest);
+        if(style[0] == 0){
+            console_puts("cursor=");
+            console_puts(cursor_style);
+            console_puts(" styles=dot,cross,target\n");
+        } else if(str_eq(style, "dot") || str_eq(style, "cross") || str_eq(style, "target")){
+            fb_set_cursor_style(style);
+            console_puts("fb: cursor style=");
+            console_puts(cursor_style);
+            console_putc('\n');
+        } else {
+            console_puts("usage: fb cursor dot|cross|target\n");
+        }
     } else if(str_eq(action, "font")){
         console_puts("font: soft 5x7 raster glyphs, command: fb text X Y COLOR WORDS\n");
     } else if(str_eq(action, "text")){
@@ -366,6 +677,6 @@ void fb_cmd(char* arg){
         uint32_t h = parse_u32(first_arg(rest, &rest));
         fb_dump_region(w, h);
     } else {
-        console_puts("usage: fb status | mode W H BPP | surface | clear C | mouse X Y | pixel X Y C | rect X Y W H [C] | text X Y C TEXT | demo | saver lava|rain|stars|waves [N] | dump [W H] | font | blit\n");
+        console_puts("usage: fb status | mode W H BPP | surface | clear C | mouse X Y | cursor dot|cross|target | pixel X Y C | rect X Y W H [C] | text X Y C TEXT | demo | saver lava|rain|stars|waves [N] | dump [W H] | font | blit\n");
     }
 }

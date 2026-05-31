@@ -216,6 +216,7 @@ static void cmd_help(void){
     console_puts("  whoami      - print current user\n");
     console_puts("  uname       - print kernel/platform identity\n");
     console_puts("  history     - show recent shell commands\n");
+    console_puts("  scroll A    - terminal scrollback: up/down/top/bottom/status\n");
     console_puts("  cat FILE    - print a file\n");
     console_puts("  block ARGS  - block device: status/read/write/save/load\n");
     console_puts("  fd ARGS     - file descriptors: open/read/write/close/list\n");
@@ -244,6 +245,7 @@ static void cmd_help(void){
     console_puts("  math TOPIC  - linear algebra, number theory, groups, stats\n");
     console_puts("  gfx ARGS    - vector graphics: line/rect/circle/scene\n");
     console_puts("  fb ARGS     - framebuffer: status/mode/surface/mouse/blit\n");
+    console_puts("  mouse ARGS  - crosshair pointer: status/set/move/click\n");
     console_puts("  job ARGS    - generic OS job scheduler: list/run/priority\n");
     console_puts("  sched ARGS  - cooperative scheduler: list/yield/wake/sleep/quantum\n");
     console_puts("  taskman A   - task manager: top/ps/jobs/services/kill/boost\n");
@@ -271,6 +273,13 @@ static void cmd_help(void){
     console_puts("  user[\"guest\"].login() / event[\"net-audit\"].emit()\n");
     console_puts("  package[\"editor\"].install() / info() / remove()\n");
     console_puts("  spawn editor [FILE]\n");
+}
+
+static void boot_full_stack(void){
+    char net_up[] = "up";
+    console_puts("autostart: network, GUI desktop, mouse crosshair, scheduler\n");
+    net_cmd(net_up);
+    gui_enter_desktop();
 }
 
 static void cmd_about(void){
@@ -1445,6 +1454,7 @@ static void kernel_shell_dispatch(char* line){
     else if(cmd_is(cmd,"uname")) cmd_uname();
     else if(cmd_is(cmd,"whoami")) cmd_whoami();
     else if(cmd_is(cmd,"history")) cmd_history();
+    else if(cmd_is(cmd,"scroll") || cmd_is(cmd,"term")) console_scroll_cmd(arg);
     else if(cmd_is(cmd,"cls") || cmd_is(cmd,"clear")) console_clear_output();
     else if(cmd_is(cmd,"fault") || cmd_is(cmd,"panic")) cmd_fault();
     else if(cmd_is(cmd,"echo")) { console_puts(arg); console_putc('\n'); }
@@ -1590,6 +1600,7 @@ static void kernel_shell_dispatch(char* line){
 
 void kmain(uint32_t mb_magic, uint32_t mb_info_addr){
     console_init();
+    fb_bootstrap(mb_info_addr);
     shell_session_init();
     editor_init();
     fs_init();
@@ -1628,6 +1639,7 @@ void kmain(uint32_t mb_magic, uint32_t mb_info_addr){
     heap_init();
     serial_puts("heap ok\n");
     paging_init();
+    fb_map_hardware();
     serial_puts("paging ok\n");
     idt_init();
     serial_puts("idt ok\n");
@@ -1644,12 +1656,71 @@ void kmain(uint32_t mb_magic, uint32_t mb_info_addr){
     __asm__ __volatile__("sti");
 
     console_puts("Ready.\n");
-    prompt();
+    boot_full_stack();
+    int gui_desktop_mode = 1;
+    char gui_launch_cmd[128];
 
     size_t len=0;
     for(;;){
         int key = kb_read_key();
-        if(key==0){ __asm__ __volatile__("hlt"); continue; }
+        if(key==0){
+            if(gui_desktop_mode && gui_take_terminal_request()){
+                gui_active_terminal_command(gui_launch_cmd, sizeof(gui_launch_cmd));
+                gui_desktop_mode = 0;
+                console_framebuffer_terminal(1);
+                console_input_clear();
+                console_puts("Terminal opened from GUI desktop.\n");
+                prompt();
+                if(gui_launch_cmd[0]){
+                    console_puts(gui_launch_cmd);
+                    console_putc('\n');
+                    history_add(gui_launch_cmd);
+                    shell_eval(gui_launch_cmd);
+                    prompt();
+                }
+                continue;
+            }
+            __asm__ __volatile__("hlt");
+            continue;
+        }
+
+        if(gui_desktop_mode){
+            if(gui_key_captures(key)){
+                gui_handle_key(key);
+                continue;
+            }
+            if(key == '\n' || gui_take_terminal_request()){
+                gui_active_terminal_command(gui_launch_cmd, sizeof(gui_launch_cmd));
+                gui_desktop_mode = 0;
+                console_framebuffer_terminal(1);
+                console_input_clear();
+                console_puts("Terminal opened from GUI desktop.\n");
+                prompt();
+                if(gui_launch_cmd[0]){
+                    console_puts(gui_launch_cmd);
+                    console_putc('\n');
+                    history_add(gui_launch_cmd);
+                    shell_eval(gui_launch_cmd);
+                    prompt();
+                }
+                continue;
+            }
+            if(key == 27){
+                gui_enter_desktop();
+                continue;
+            }
+            gui_handle_key(key);
+            continue;
+        }
+
+        if(key == KB_KEY_PAGE_UP){
+            console_scroll(12);
+            continue;
+        }
+        if(key == KB_KEY_PAGE_DOWN){
+            console_scroll(-12);
+            continue;
+        }
 
         if(editor_is_active() && key == KB_KEY_UP){
             editor_move(-1, &len);
@@ -1695,6 +1766,12 @@ void kmain(uint32_t mb_magic, uint32_t mb_info_addr){
             if(editor_is_active()){
                 console_input_clear();
                 editor_close();
+            } else {
+                shell_reset_input(&len);
+                gui_desktop_mode = 1;
+                console_framebuffer_terminal(0);
+                gui_enter_desktop();
+                continue;
             }
             shell_reset_input(&len);
             prompt();

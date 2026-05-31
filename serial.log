@@ -16,125 +16,826 @@ timer ok
 keyboard ok
 mouse ok
 Ready.
-tr:/home $ test
-Tabla Rusa OS selftest
-[ok]   console
-timer: ticks=441
-memory: entries=6 usable_kib=130559
-[ok]   paging enabled
-[ok]   fs /home
-[ok]   fs /home/math
-[ok]   fs write/read
-[ok]   fd open
-event fs-audit -> log filesystem mutation
-[ok]   fd write
-[ok]   fd read
-[ok]   fd per-process count
-[ok]   fd close
-[ok]   process compute
-[ok]   program /bin/hello.trx
-[ok]   program /bin/mathbench.trx
-[ok]   program /bin/gui.trx
-[ok]   program /bin/netup.trx
-[ok]   program /bin/physics.trx
-[ok]   program /bin/readme.trx
-[ok]   program /bin/paint.trx
-exec /bin/hello.trx kind=trx-bytecode
-entry: PRINT
-hello-from-trx
-[ok]   loader run hello
-true
-[ok]   object dispatcher
-[ok]   scheduler yield
-[ok]   scheduler context switch
-fb mode=640x480x32 raster=96x54 surfaces=3 pixels=0 rects=0 glyphs=0 saver=none mouse=32,24 checksum=3107272994
-[ok]   framebuffer descriptor
-[ok]   framebuffer raster
-[ok]   mouse crosshair input
-[ok]   vector gfx manifest
-[ok]   trx runtime docs
-[ok]   network stack descriptor
-socket id=0 fd=0 udp owner=1 port=9999 state=OPEN
-packet queued on loopback
-[ok]   network packet queue
-[ok]   privacy network allowed
-[ok]   block descriptor
-[ok]   Rusa docs
-[ok]   Rusa stdlib
-[ok]   Rusa source stdlib
-rusa <selftest>
-4
-[ok]   Rusa source runtime
-rusa <selftest-bad>
-Rusa found a problem
-where: <selftest-bad>:1:12
-what: missing equals sign
-plain english: Rusa expected '=' before the value you want to store.
-source: let broken 3
-                   ^
-try: Use: let name: int = 1 or set name = name + 1
-open: lang open-error
-[ok]   Rusa diagnostics
-rusa <selftest-event>
-[ok]   Rusa persistent events
-event rusa-ev-0 -> rusa handler
-rusa <event>
-event-ok
-[ok]   Rusa object docs
-security user=root secure_mode=on
-selftest pass=38 fail=0
-tr:/home $ privacy status
-PRIVACY CENTER
-[on]  master privacy - main permission for connections and device features
-[on]  network - internet/loopback sockets and ports
-[on]  devices - keyboard, mouse, framebuffer, block devices
-[off] telemetry - background reporting; currently local-only and off
-cookies: ask - plain meaning: ask before storing session or tracking tokens
-
-Connections and ports:
-sock 0 udp OPEN local=9999 remote=0 fd=0 owner=1 tx=1 rx=1 data=selftest-packet
-Network stats:
-net stats tx=1 rx=1 drops=0 checksum_errors=0 state_changes=0
-Programs:
-0  run kernel  kernel prio=100 class=system switches=0 last=0
-1  run user  shell prio=40 class=interactive switches=12 last=470
-2  stop user  editor prio=35 class=interactive switches=0 last=0
-3  run service  logger prio=20 class=io switches=12 last=442
-4  stop service  network prio=55 class=io switches=0 last=0
-5  run service  compute prio=90 class=scientific switches=12 last=450
-tr:/home $ net socket tcp 8080
-socket id=1 fd=1 tcp owner=1 port=8080 state=LISTEN
-tr:/home $ net connect 1 9000
-socket connected state=ESTABLISHED
-tr:/home $ privacy ports
-sock 0 udp OPEN local=9999 remote=0 fd=0 owner=1 tx=1 rx=1 data=selftest-packet
-sock 1 tcp ESTABLISHED local=8080 remote=9000 fd=1 owner=1 tx=1 rx=1 data=SYN
-tr:/home $ privacy off
+autostart: network, GUI desktop, mouse crosshair, scheduler
 event service-audit -> log service state change
-privacy: master switch off, network disconnected
-tr:/home $ net send 1 should-block
-send: blocked by privacy switch
-tr:/home $ privacy status
-PRIVACY CENTER
-[off] master privacy - main permission for connections and device features
-[off] network - internet/loopback sockets and ports
-[on]  devices - keyboard, mouse, framebuffer, block devices
-[off] telemetry - background reporting; currently local-only and off
-cookies: ask - plain meaning: ask before storing session or tracking tokens
-
-Connections and ports:
-sock 0 udp OPEN local=9999 remote=0 fd=0 owner=1 tx=1 rx=1 data=selftest-packet
-sock 1 tcp CLOSED local=8080 remote=9000 fd=1 owner=1 tx=1 rx=1 data=SYN
-Network stats:
-net stats tx=2 rx=2 drops=0 checksum_errors=0 state_changes=3
-Programs:
-0  run kernel  kernel prio=100 class=system switches=0 last=0
-1  run user  shell prio=40 class=interactive switches=17 last=670
-2  stop user  editor prio=35 class=interactive switches=0 last=0
-3  run service  logger prio=20 class=io switches=18 last=680
-4  stop service  network prio=55 class=io switches=0 last=0
-5  run service  compute prio=90 class=scientific switches=17 last=650
-tr:/home $ privacy network on
-privacy: network allowed
-tr:/home $ net send 1 allowed-again
-send: blocked by privacy switch
+event net-audit -> log network link up
+net: eth0 up (stub link)
+event service-audit -> log service state change
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: shell  surface=vga-text  pos=0,0
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
+Terminal opened from GUI desktop.
+edit /home/notes.txt
+event fs-audit -> log filesystem mutation
+event editor-focus -> window editor focus
+Editing /home/notes.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+> 01 | 
+edit> ls
+Editing /home/notes.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | ls
+> 02 | 
+edit> cd
+Editing /home/notes.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | ls
+  02 | cd
+> 03 | 
+editor closed
+event service-audit -> log service state change
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
+Terminal opened from GUI desktop.
+edit /home/notes.txt
+event fs-audit -> log filesystem mutation
+event editor-focus -> window editor focus
+Editing /home/notes.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | ls
+  02 | cd
+> 03 | 
+edit> :q
+editor closed
+tr:/home $ ls
+[d] docs
+[d] math
+[d] projects
+[d] downloads
+[f] readme.txt
+[f] notes.txt
+event service-audit -> log service state change
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=0,1
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
+Terminal opened from GUI desktop.
+edit /home/notes.txt
+event fs-audit -> log filesystem mutation
+event editor-focus -> window editor focus
+Editing /home/notes.txt   Arrows move  Enter saves line  :w save  :q quit  Esc exit
+---------------------------------------------------------------
+  01 | ls
+  02 | cd
+> 03 | 

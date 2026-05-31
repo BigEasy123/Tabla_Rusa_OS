@@ -16,6 +16,16 @@ mb2_start:
     dd MB2_ARCH_I386
     dd MB2_LEN
     dd MB2_CHECKSUM
+
+align 8
+    dw 5          ; framebuffer request tag
+    dw 0          ; optional
+    dd 20         ; size
+    dd 1024       ; width
+    dd 768        ; height
+    dd 32         ; depth
+
+align 8
     dw 0          ; end tag type
     dw 0          ; flags
     dd 8          ; size
@@ -46,5 +56,5 @@ _start:
 SECTION .bss
 align 16
 stack_bottom:
-    resb 4096
+    resb 32768
 stack_top:
