@@ -1680,6 +1680,8 @@ void kmain(uint32_t mb_magic, uint32_t mb_info_addr){
                 }
                 continue;
             }
+            if(gui_desktop_mode)
+                gui_tick();
             __asm__ __volatile__("hlt");
             continue;
         }
@@ -1748,6 +1750,27 @@ void kmain(uint32_t mb_magic, uint32_t mb_info_addr){
             if(shell_cursor() < len)
                 shell_set_cursor(shell_cursor() + 1);
             redraw_input(&len);
+            continue;
+        }
+        if(key == KB_KEY_HOME){
+            shell_set_cursor(0);
+            redraw_input(&len);
+            continue;
+        }
+        if(key == KB_KEY_END){
+            shell_set_cursor(len);
+            redraw_input(&len);
+            continue;
+        }
+        if(key == KB_KEY_DELETE){
+            char* inbuf = shell_input_buffer();
+            size_t cur = shell_cursor();
+            if(cur < len){
+                for(size_t i=cur; i<len; i++)
+                    inbuf[i] = inbuf[i + 1];
+                len--;
+                redraw_input(&len);
+            }
             continue;
         }
         if(key == KB_KEY_UP){

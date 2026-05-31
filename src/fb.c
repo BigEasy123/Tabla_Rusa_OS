@@ -411,6 +411,93 @@ static uint32_t wave_value(uint32_t x, uint32_t y, uint32_t frame){
     return ((a ^ b) * 4) & 255;
 }
 
+static uint32_t mix_channel(uint32_t a, uint32_t b, uint32_t t, uint32_t max){
+    if(max == 0) return a & 0xFF;
+    return (((a & 0xFF) * (max - t)) + ((b & 0xFF) * t)) / max;
+}
+
+static uint32_t mix_color(uint32_t a, uint32_t b, uint32_t t, uint32_t max){
+    uint32_t ar = (a >> 16) & 0xFF;
+    uint32_t ag = (a >> 8) & 0xFF;
+    uint32_t ab = a & 0xFF;
+    uint32_t br = (b >> 16) & 0xFF;
+    uint32_t bg = (b >> 8) & 0xFF;
+    uint32_t bb = b & 0xFF;
+    return (mix_channel(ar, br, t, max) << 16) |
+           (mix_channel(ag, bg, t, max) << 8) |
+           mix_channel(ab, bb, t, max);
+}
+
+static void wallpaper_gradient(uint32_t top, uint32_t bottom){
+    uint32_t h = fb.height ? fb.height : 1;
+    for(uint32_t y=0; y<h; y+=4){
+        uint32_t color = mix_color(top, bottom, y, h - 1);
+        fb_fill_rect(0, y, fb.width, 4, color);
+    }
+}
+
+static void wallpaper_disk(int cx, int cy, int radius, uint32_t inner, uint32_t outer){
+    int r2 = radius * radius;
+    if(radius <= 0) return;
+    for(int y=cy-radius; y<=cy+radius; y++){
+        if(y < 0 || y >= (int)fb.height) continue;
+        for(int x=cx-radius; x<=cx+radius; x++){
+            if(x < 0 || x >= (int)fb.width) continue;
+            int dx = x - cx;
+            int dy = y - cy;
+            int d2 = dx * dx + dy * dy;
+            if(d2 > r2) continue;
+            uint32_t color = mix_color(inner, outer, (uint32_t)d2, (uint32_t)r2);
+            fb_put_pixel((uint32_t)x, (uint32_t)y, color);
+        }
+    }
+}
+
+static void wallpaper_line(uint32_t y, uint32_t color){
+    if(y < fb.height)
+        fb_fill_rect(0, y, fb.width, 2, color);
+}
+
+void fb_draw_wallpaper(const char* name, int animate){
+    uint32_t frame = animate ? fb.frames++ : fb.frames;
+    if(!name || !name[0])
+        name = "calm";
+    copy_text(saver_name, name, sizeof(saver_name));
+    if(str_eq(name, "rain")){
+        wallpaper_gradient(0x1F3442, 0x0D141C);
+        for(uint32_t i=0; i<42; i++){
+            uint32_t x = (i * 47 + (animate ? frame * 3 : 0)) % (fb.width ? fb.width : 1);
+            uint32_t y = (i * 71 + (animate ? frame * 5 : 0)) % (fb.height ? fb.height : 1);
+            fb_fill_rect(x, y, 2, 18, 0x8AB8C8);
+        }
+    } else if(str_eq(name, "stars")){
+        wallpaper_gradient(0x10172A, 0x05070D);
+        for(uint32_t i=0; i<120; i++){
+            uint32_t x = (i * 53 + (animate ? frame : 0)) % (fb.width ? fb.width : 1);
+            uint32_t y = (i * 31 + (i % 7) * 19) % (fb.height ? fb.height : 1);
+            uint32_t color = (i % 5 == 0) ? 0xD8E8FF : 0x7F98B8;
+            fb_fill_rect(x, y, 2, 2, color);
+        }
+    } else if(str_eq(name, "waves")){
+        wallpaper_gradient(0x143C50, 0x071820);
+        for(uint32_t y=120; y<fb.height; y+=44){
+            uint32_t drift = animate ? (frame + y) % 28 : y % 28;
+            wallpaper_line(y + drift, 0x3F8794);
+            wallpaper_line(y + 14 + drift / 2, 0x73B2B8);
+        }
+    } else {
+        wallpaper_gradient(0x263040, 0x0D1218);
+        uint32_t shift = animate ? (frame % 80) : 0;
+        wallpaper_disk(270 + (int)shift / 4, 230, 118, 0xB85A42, 0x273040);
+        wallpaper_disk(502, 390 + (int)shift / 6, 156, 0x7D486E, 0x17202A);
+        wallpaper_disk(760 - (int)shift / 5, 230, 104, 0xD18A46, 0x202838);
+        fb_fill_rect(0, fb.height > 170 ? fb.height - 170 : 0, fb.width, 170, 0x101820);
+        for(uint32_t y=fb.height > 170 ? fb.height - 170 : 0; y<fb.height; y+=14)
+            wallpaper_line(y, 0x182431);
+    }
+    cursor_back_count = 0;
+}
+
 static void saver_lava(uint32_t frame){
     fb_clear(8);
     for(uint32_t y=0; y<FB_RASTER_H; y++){
@@ -476,16 +563,7 @@ void fb_run_saver(const char* name, uint32_t frames){
 }
 
 void fb_draw_saver_backdrop(const char* name){
-    if(!name || !name[0])
-        name = "lava";
-    copy_text(saver_name, name, sizeof(saver_name));
-    if(str_eq(name, "lava")) saver_lava(fb.frames);
-    else if(str_eq(name, "rain")) saver_rain(fb.frames);
-    else if(str_eq(name, "stars")) saver_stars(fb.frames);
-    else if(str_eq(name, "waves")) saver_waves(fb.frames);
-    else saver_lava(fb.frames);
-    fb.frames++;
-    hw_blit_raster();
+    fb_draw_wallpaper(name, 1);
 }
 
 static void fb_draw_demo(void){

@@ -8,6 +8,8 @@ struct window_info {
     int focused;
     int x;
     int y;
+    int w;
+    int h;
     const char* surface;
 };
 
@@ -16,6 +18,7 @@ struct window_info* window_find(const char* name);
 void window_focus(const char* name);
 void window_focus_next(void);
 void window_move(const char* name, int x, int y);
+void window_resize(const char* name, int w, int h);
 void window_list(void);
 const struct window_info* window_focused(void);
 

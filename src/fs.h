@@ -17,5 +17,8 @@ int fs_stat(const char* path, int* type, size_t* size);
 void fs_pwd(char* out, size_t max);
 void fs_ls(const char* path);
 void fs_tree(const char* path);
+int fs_child_count(const char* path);
+int fs_child_name(const char* path, int index, char* out, size_t max, int* type);
+void fs_join_path(const char* dir, const char* name, char* out, size_t max);
 
 #endif

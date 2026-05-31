@@ -15,6 +15,7 @@ void fb_set_mouse(uint32_t x, uint32_t y, uint32_t buttons);
 void fb_set_cursor_style(const char* style);
 const char* fb_cursor_style(void);
 uint32_t fb_checksum(void);
+void fb_draw_wallpaper(const char* name, int animate);
 void fb_draw_saver_backdrop(const char* name);
 void fb_run_saver(const char* name, uint32_t frames);
 void fb_cmd(char* arg);

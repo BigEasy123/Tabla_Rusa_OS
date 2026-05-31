@@ -188,6 +188,7 @@ void fs_init(void){
         "Native forms: inspect memory, file[\"readme.txt\"].read(), spawn editor notes.txt\n");
     fs_write("/boot/kernel.cfg", "kernel=tabla-rusa\narch=i386\nruntime=tabla:0.1\n");
     fs_write("/config/system.conf", "hostname=tabla\nsecure_mode=on\ngui=planned\nnetwork=loopback\n");
+    fs_write("/config/gui.conf", "wallpaper=lava\nwallpaper_live=no\ncursor=dot\neditor_mode=paper\neditor_path=/home/notes.txt\n");
     fs_write("/dev/keyboard", "device=ps2-keyboard\nstate=active\n");
     fs_write("/dev/console", "device=vga-text-console\nstate=active\n");
     fs_write("/proc/version", "Tabla Rusa OS 0.0.5 i386 tabla:0.1\n");
@@ -399,4 +400,52 @@ void fs_tree(const char* path){
         return;
     }
     tree_node(id, 0);
+}
+
+int fs_child_count(const char* path){
+    int id = (path && path[0]) ? resolve(path) : cwd;
+    int count = 0;
+    if(id < 0 || nodes[id].type != FS_DIR)
+        return 0;
+    for(int i=0; i<FS_MAX_NODES; i++)
+        if(nodes[i].type != FS_UNUSED && nodes[i].parent == id)
+            count++;
+    return count;
+}
+
+int fs_child_name(const char* path, int index, char* out, size_t max, int* type){
+    int id = (path && path[0]) ? resolve(path) : cwd;
+    int n = 0;
+    if(id < 0 || nodes[id].type != FS_DIR)
+        return -1;
+    for(int i=0; i<FS_MAX_NODES; i++){
+        if(nodes[i].type != FS_UNUSED && nodes[i].parent == id){
+            if(n == index){
+                str_copy(out, nodes[i].name, max);
+                if(type)
+                    *type = nodes[i].type == FS_DIR ? 1 : 2;
+                return 0;
+            }
+            n++;
+        }
+    }
+    return -1;
+}
+
+void fs_join_path(const char* dir, const char* name, char* out, size_t max){
+    size_t pos = 0;
+    if(max == 0) return;
+    if(!dir || !dir[0])
+        dir = "/";
+    while(dir[pos] && pos + 1 < max){
+        out[pos] = dir[pos];
+        pos++;
+    }
+    if(pos > 1 && out[pos - 1] != '/' && pos + 1 < max)
+        out[pos++] = '/';
+    if(pos == 0 && pos + 1 < max)
+        out[pos++] = '/';
+    for(size_t i=0; name && name[i] && pos + 1 < max; i++)
+        out[pos++] = name[i];
+    out[pos] = 0;
 }

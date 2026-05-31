@@ -8,6 +8,7 @@
 #include "privacy.h"
 #include "process.h"
 #include "service.h"
+#include "timer.h"
 #include "window.h"
 #include "gui.h"
 
@@ -15,22 +16,42 @@ static int running = 0;
 static int autostarted = 0;
 static int desktop_mode = 0;
 static int terminal_requested = 0;
-static char active_app[16] = "terminal";
+static char active_app[16] = "desktop";
 static char saver_hint[16] = "lava";
 static char launch_notice[48] = "";
-static uint32_t open_apps = 1U;
-static int saver_backdrop = 0;
+static char launch_override[128] = "";
+static uint32_t open_apps = 0;
+static int saver_backdrop = 1;
+static int saver_live = 0;
+static uint32_t saver_last_tick = 0;
+static uint32_t gui_busy_until = 0;
 static int editor_mode = 0; /* 0=paper, 1=code */
 static int rusa_tab = 0;
 static int editor_focused = 0;
 static int editor_dirty = 0;
 static uint32_t editor_line = 0;
 static uint32_t editor_col = 0;
+static uint32_t editor_top = 0;
+static char editor_current_path[96] = "/home/notes.txt";
+static char file_dir[96] = "/home";
+static char file_selected[96] = "/home/readme.txt";
+static char terminal_view[160] = "Terminal ready. Open an app command or press Enter.";
+static char rusa_view[160] = "Rusa Workbench ready. Choose Check or Run.";
+static char editor_clipboard[72] = "";
+static uint32_t gui_win_x = 174;
+static uint32_t gui_win_y = 72;
+static uint32_t gui_win_w = 820;
+static uint32_t gui_win_h = 594;
+static int gui_dragging = 0;
 
-#define GUI_EDITOR_LINES 9
+#define GUI_EDITOR_VISIBLE_LINES 9
+#define GUI_EDITOR_MAX_LINES 64
 #define GUI_EDITOR_COLS 72
+#define GUI_FONT_ADVANCE 6
+#define GUI_WALLPAPER_TICKS 90
+#define GUI_INPUT_QUIET_TICKS 30
 
-static char editor_buf[GUI_EDITOR_LINES][GUI_EDITOR_COLS];
+static char editor_buf[GUI_EDITOR_MAX_LINES][GUI_EDITOR_COLS];
 
 #define APP_FILES    (1U << 0)
 #define APP_TERM     (1U << 1)
@@ -41,9 +62,18 @@ static char editor_buf[GUI_EDITOR_LINES][GUI_EDITOR_COLS];
 #define APP_NET      (1U << 6)
 #define APP_SAVER    (1U << 7)
 #define APP_EDITOR   (1U << 8)
+#define APP_PROJECTS (1U << 9)
+#define APP_PACKAGES (1U << 10)
+#define APP_LOGS     (1U << 11)
+#define APP_SECURITY (1U << 12)
+#define APP_EVENTS   (1U << 13)
+#define APP_STORAGE  (1U << 14)
+#define APP_INSPECTOR (1U << 15)
 
 void gui_enter_desktop(void);
 static const char* editor_path(void);
+static void editor_clamp_cursor(void);
+static void gui_focus_app(const char* app);
 
 static char lower_char(char c){
     if(c >= 'A' && c <= 'Z') return (char)(c - 'A' + 'a');
@@ -57,6 +87,18 @@ static int str_eq(const char* a, const char* b){
         b++;
     }
     return *a == 0 && *b == 0;
+}
+
+static int text_has(const char* text, const char* pattern){
+    if(!pattern || !pattern[0]) return 1;
+    for(uint32_t i=0; text && text[i]; i++){
+        uint32_t j = 0;
+        while(text[i + j] && pattern[j] && lower_char(text[i + j]) == lower_char(pattern[j]))
+            j++;
+        if(!pattern[j])
+            return 1;
+    }
+    return 0;
 }
 
 static int is_space(char c){
@@ -101,6 +143,7 @@ static int active_is(const char* name){
 }
 
 static uint32_t app_mask(const char* app){
+    if(str_eq(app, "desktop")) return 0;
     if(str_eq(app, "files")) return APP_FILES;
     if(str_eq(app, "terminal")) return APP_TERM;
     if(str_eq(app, "math")) return APP_MATH;
@@ -110,33 +153,74 @@ static uint32_t app_mask(const char* app){
     if(str_eq(app, "network") || str_eq(app, "net")) return APP_NET;
     if(str_eq(app, "saver")) return APP_SAVER;
     if(str_eq(app, "editor")) return APP_EDITOR;
-    return APP_TERM;
+    if(str_eq(app, "projects") || str_eq(app, "project")) return APP_PROJECTS;
+    if(str_eq(app, "packages") || str_eq(app, "package") || str_eq(app, "pkg")) return APP_PACKAGES;
+    if(str_eq(app, "logs") || str_eq(app, "log")) return APP_LOGS;
+    if(str_eq(app, "security") || str_eq(app, "sec")) return APP_SECURITY;
+    if(str_eq(app, "events") || str_eq(app, "event")) return APP_EVENTS;
+    if(str_eq(app, "storage") || str_eq(app, "disk") || str_eq(app, "block")) return APP_STORAGE;
+    if(str_eq(app, "inspector") || str_eq(app, "inspect")) return APP_INSPECTOR;
+    return 0;
+}
+
+static const char* canonical_app(const char* app){
+    if(str_eq(app, "tasks")) return "taskman";
+    if(str_eq(app, "net")) return "network";
+    if(str_eq(app, "settings")) return "privacy";
+    if(str_eq(app, "term")) return "terminal";
+    if(str_eq(app, "project")) return "projects";
+    if(str_eq(app, "pkg") || str_eq(app, "package")) return "packages";
+    if(str_eq(app, "log")) return "logs";
+    if(str_eq(app, "sec")) return "security";
+    if(str_eq(app, "event")) return "events";
+    if(str_eq(app, "disk") || str_eq(app, "block")) return "storage";
+    if(str_eq(app, "inspect")) return "inspector";
+    return app;
 }
 
 static int app_is_open(const char* app){
-    return (open_apps & app_mask(app)) != 0;
+    uint32_t mask = app_mask(app);
+    return mask != 0 && (open_apps & mask) != 0;
 }
 
 static void app_open(const char* app){
     open_apps |= app_mask(app);
 }
 
+static void app_focus_next_or_desktop(void){
+    if(open_apps & APP_FILES) copy_text(active_app, "files", sizeof(active_app));
+    else if(open_apps & APP_MATH) copy_text(active_app, "math", sizeof(active_app));
+    else if(open_apps & APP_RUSA) copy_text(active_app, "rusa", sizeof(active_app));
+    else if(open_apps & APP_SETTINGS) copy_text(active_app, "privacy", sizeof(active_app));
+    else if(open_apps & APP_TASKS) copy_text(active_app, "taskman", sizeof(active_app));
+    else if(open_apps & APP_NET) copy_text(active_app, "network", sizeof(active_app));
+    else if(open_apps & APP_EDITOR) copy_text(active_app, "editor", sizeof(active_app));
+    else if(open_apps & APP_SAVER) copy_text(active_app, "saver", sizeof(active_app));
+    else if(open_apps & APP_PROJECTS) copy_text(active_app, "projects", sizeof(active_app));
+    else if(open_apps & APP_PACKAGES) copy_text(active_app, "packages", sizeof(active_app));
+    else if(open_apps & APP_LOGS) copy_text(active_app, "logs", sizeof(active_app));
+    else if(open_apps & APP_SECURITY) copy_text(active_app, "security", sizeof(active_app));
+    else if(open_apps & APP_EVENTS) copy_text(active_app, "events", sizeof(active_app));
+    else if(open_apps & APP_STORAGE) copy_text(active_app, "storage", sizeof(active_app));
+    else if(open_apps & APP_INSPECTOR) copy_text(active_app, "inspector", sizeof(active_app));
+    else if(open_apps & APP_TERM) copy_text(active_app, "terminal", sizeof(active_app));
+    else copy_text(active_app, "desktop", sizeof(active_app));
+}
+
 static void app_close(const char* app){
     uint32_t mask = app_mask(app);
-    if(mask == APP_TERM)
+    if(mask == 0){
+        copy_text(active_app, "desktop", sizeof(active_app));
+        editor_focused = 0;
         return;
-    open_apps &= ~mask;
-    if(active_is(app)){
-        if(open_apps & APP_FILES) copy_text(active_app, "files", sizeof(active_app));
-        else if(open_apps & APP_MATH) copy_text(active_app, "math", sizeof(active_app));
-        else if(open_apps & APP_RUSA) copy_text(active_app, "rusa", sizeof(active_app));
-        else if(open_apps & APP_SETTINGS) copy_text(active_app, "privacy", sizeof(active_app));
-        else if(open_apps & APP_TASKS) copy_text(active_app, "taskman", sizeof(active_app));
-        else if(open_apps & APP_NET) copy_text(active_app, "network", sizeof(active_app));
-        else if(open_apps & APP_EDITOR) copy_text(active_app, "editor", sizeof(active_app));
-        else if(open_apps & APP_SAVER) copy_text(active_app, "saver", sizeof(active_app));
-        else copy_text(active_app, "terminal", sizeof(active_app));
     }
+    open_apps &= ~mask;
+    if(mask == APP_EDITOR)
+        editor_focused = 0;
+    if(mask == APP_TERM && app_mask(active_app) == mask)
+        copy_text(active_app, "desktop", sizeof(active_app));
+    else if(app_mask(active_app) == mask)
+        app_focus_next_or_desktop();
 }
 
 static void u32_text(uint32_t value, char* out, uint32_t max){
@@ -171,14 +255,86 @@ static void append_text(char* dst, const char* src, uint32_t max){
     dst[i] = 0;
 }
 
+static void gui_note_activity(void){
+    gui_busy_until = timer_ticks() + GUI_INPUT_QUIET_TICKS;
+}
+
+static void gui_save_settings(void){
+    char text[256];
+    copy_text(text, "wallpaper=", sizeof(text));
+    append_text(text, saver_hint, sizeof(text));
+    append_text(text, "\nwallpaper_live=", sizeof(text));
+    append_text(text, saver_live ? "yes" : "no", sizeof(text));
+    append_text(text, "\ncursor=", sizeof(text));
+    append_text(text, fb_cursor_style(), sizeof(text));
+    append_text(text, "\neditor_mode=", sizeof(text));
+    append_text(text, editor_mode ? "code" : "paper", sizeof(text));
+    append_text(text, "\neditor_path=", sizeof(text));
+    append_text(text, editor_current_path, sizeof(text));
+    append_text(text, "\n", sizeof(text));
+    fs_write("/config/gui.conf", text);
+}
+
+static void gui_load_settings(void){
+    const char* text;
+    if(fs_read("/config/gui.conf", &text) != 0)
+        return;
+    if(text_has(text, "wallpaper=rain")) copy_text(saver_hint, "rain", sizeof(saver_hint));
+    else if(text_has(text, "wallpaper=stars")) copy_text(saver_hint, "stars", sizeof(saver_hint));
+    else if(text_has(text, "wallpaper=waves")) copy_text(saver_hint, "waves", sizeof(saver_hint));
+    else if(text_has(text, "wallpaper=lava")) copy_text(saver_hint, "lava", sizeof(saver_hint));
+    saver_live = text_has(text, "wallpaper_live=yes");
+    if(text_has(text, "cursor=cross")) fb_set_cursor_style("cross");
+    else if(text_has(text, "cursor=target")) fb_set_cursor_style("target");
+    else if(text_has(text, "cursor=dot")) fb_set_cursor_style("dot");
+    if(text_has(text, "editor_mode=code")) editor_mode = 1;
+    else if(text_has(text, "editor_mode=paper")) editor_mode = 0;
+}
+
 static uint32_t text_len32(const char* s){
     uint32_t n = 0;
     while(s && s[n]) n++;
     return n;
 }
 
+static void editor_ensure_visible(void){
+    if(editor_line >= GUI_EDITOR_MAX_LINES)
+        editor_line = GUI_EDITOR_MAX_LINES - 1;
+    if(editor_line < editor_top)
+        editor_top = editor_line;
+    if(editor_line >= editor_top + GUI_EDITOR_VISIBLE_LINES)
+        editor_top = editor_line - GUI_EDITOR_VISIBLE_LINES + 1;
+}
+
+static void editor_scroll(int delta){
+    if(delta > 0){
+        uint32_t step = (uint32_t)delta;
+        editor_top = step > editor_top ? 0 : editor_top - step;
+    } else if(delta < 0){
+        uint32_t max_top = GUI_EDITOR_MAX_LINES - GUI_EDITOR_VISIBLE_LINES;
+        editor_top += (uint32_t)(-delta);
+        if(editor_top > max_top)
+            editor_top = max_top;
+    }
+    if(editor_line < editor_top)
+        editor_line = editor_top;
+    if(editor_line >= editor_top + GUI_EDITOR_VISIBLE_LINES)
+        editor_line = editor_top + GUI_EDITOR_VISIBLE_LINES - 1;
+    if(editor_col > text_len32(editor_buf[editor_line]))
+        editor_col = text_len32(editor_buf[editor_line]);
+}
+
+static void editor_line_label(uint32_t line, char* out, uint32_t max){
+    uint32_t n = line + 1;
+    if(max < 4) return;
+    out[0] = (n >= 10) ? (char)('0' + ((n / 10) % 10)) : ' ';
+    out[1] = (char)('0' + (n % 10));
+    out[2] = ' ';
+    out[3] = 0;
+}
+
 static void editor_seed(void){
-    for(uint32_t i=0; i<GUI_EDITOR_LINES; i++)
+    for(uint32_t i=0; i<GUI_EDITOR_MAX_LINES; i++)
         editor_buf[i][0] = 0;
     if(editor_mode){
         copy_text(editor_buf[0], "import std", sizeof(editor_buf[0]));
@@ -196,6 +352,7 @@ static void editor_seed(void){
     }
     editor_line = 0;
     editor_col = text_len32(editor_buf[0]);
+    editor_top = 0;
     editor_dirty = 0;
 }
 
@@ -205,7 +362,7 @@ static void editor_load_file(void){
     if(fs_read(editor_path(), &text) == 0){
         uint32_t row = 0;
         uint32_t col = 0;
-        for(uint32_t i=0; text[i] && row < GUI_EDITOR_LINES; i++){
+        for(uint32_t i=0; text[i] && row < GUI_EDITOR_MAX_LINES; i++){
             if(text[i] == '\n'){
                 editor_buf[row][col] = 0;
                 row++;
@@ -218,14 +375,19 @@ static void editor_load_file(void){
     }
     editor_line = 0;
     editor_col = text_len32(editor_buf[0]);
+    editor_top = 0;
     editor_dirty = 0;
 }
 
 static void editor_save_file(void){
-    char text[GUI_EDITOR_LINES * GUI_EDITOR_COLS];
+    char text[GUI_EDITOR_MAX_LINES * GUI_EDITOR_COLS];
     uint32_t pos = 0;
+    uint32_t last = 0;
     text[0] = 0;
-    for(uint32_t row=0; row<GUI_EDITOR_LINES && pos + 2 < sizeof(text); row++){
+    for(uint32_t row=0; row<GUI_EDITOR_MAX_LINES; row++)
+        if(editor_buf[row][0])
+            last = row;
+    for(uint32_t row=0; row<=last && pos + 2 < sizeof(text); row++){
         for(uint32_t col=0; editor_buf[row][col] && pos + 1 < sizeof(text); col++)
             text[pos++] = editor_buf[row][col];
         text[pos++] = '\n';
@@ -238,13 +400,43 @@ static void editor_save_file(void){
 static void editor_set_mode(int mode){
     if(editor_mode != mode){
         editor_mode = mode;
+        copy_text(editor_current_path, editor_mode ? "/home/projects/demo.rusa" : "/home/notes.txt", sizeof(editor_current_path));
         editor_load_file();
     } else {
         editor_mode = mode;
     }
 }
 
+static void editor_open_path(const char* path){
+    if(path && path[0])
+        copy_text(editor_current_path, path, sizeof(editor_current_path));
+    if(text_has(editor_current_path, ".rusa"))
+        editor_mode = 1;
+    editor_load_file();
+}
+
+static void files_select_index(uint32_t index){
+    char name[40];
+    int type = 0;
+    if(fs_child_name(file_dir, (int)index, name, sizeof(name), &type) != 0)
+        return;
+    fs_join_path(file_dir, name, file_selected, sizeof(file_selected));
+    if(type == 1)
+        copy_text(file_dir, file_selected, sizeof(file_dir));
+}
+
+static void files_open_selected_editor(void){
+    int type = 0;
+    size_t size = 0;
+    if(fs_stat(file_selected, &type, &size) == 0 && type == 2){
+        editor_open_path(file_selected);
+        gui_focus_app("editor");
+        copy_text(launch_notice, "file opened in editor", sizeof(launch_notice));
+    }
+}
+
 static const char* app_title(void){
+    if(active_is("desktop")) return "Desktop";
     if(active_is("files")) return "Files";
     if(active_is("taskman")) return "Task Manager";
     if(active_is("math")) return "Math Lab";
@@ -254,11 +446,17 @@ static const char* app_title(void){
     if(active_is("saver")) return "Screensavers";
     if(active_is("inspector")) return "Inspector";
     if(active_is("editor")) return "Tabla Editor";
+    if(active_is("projects")) return "Projects";
+    if(active_is("packages")) return "Packages";
+    if(active_is("logs")) return "Logs";
+    if(active_is("security")) return "Security";
+    if(active_is("events")) return "Events";
+    if(active_is("storage")) return "Storage";
     return "Terminal";
 }
 
 static const char* editor_path(void){
-    return editor_mode ? "/home/projects/demo.rusa" : "/home/notes.txt";
+    return editor_current_path;
 }
 
 static const char* rusa_tab_name(void){
@@ -273,7 +471,13 @@ static const char* rusa_tab_name(void){
 void gui_active_terminal_command(char* out, uint32_t max){
     if(max == 0) return;
     out[0] = 0;
-    if(active_is("files")) copy_text(out, "tree /home", max);
+    if(launch_override[0]){
+        copy_text(out, launch_override, max);
+        launch_override[0] = 0;
+    } else if(active_is("files")){
+        copy_text(out, "tree ", max);
+        append_text(out, file_dir, max);
+    }
     else if(active_is("taskman")) copy_text(out, "taskman top", max);
     else if(active_is("math")) copy_text(out, "math help", max);
     else if(active_is("rusa")){
@@ -286,6 +490,12 @@ void gui_active_terminal_command(char* out, uint32_t max){
     }
     else if(active_is("privacy")) copy_text(out, "privacy status", max);
     else if(active_is("network")) copy_text(out, "net status", max);
+    else if(active_is("projects")) copy_text(out, "project list", max);
+    else if(active_is("packages")) copy_text(out, "pkg list", max);
+    else if(active_is("logs")) copy_text(out, "log show system", max);
+    else if(active_is("security")) copy_text(out, "security status", max);
+    else if(active_is("events")) copy_text(out, "event list", max);
+    else if(active_is("storage")) copy_text(out, "block status", max);
     else if(active_is("saver")){
         copy_text(out, "fb saver ", max);
         append_text(out, saver_hint, max);
@@ -297,13 +507,24 @@ void gui_active_terminal_command(char* out, uint32_t max){
     }
 }
 
+static void request_terminal_command(const char* command, const char* notice){
+    copy_text(launch_override, command, sizeof(launch_override));
+    copy_text(launch_notice, notice, sizeof(launch_notice));
+    copy_text(terminal_view, command, sizeof(terminal_view));
+    terminal_requested = 1;
+}
+
 static void gui_focus_app(const char* app){
+    app = canonical_app(app);
     app_open(app);
     copy_text(active_app, app, sizeof(active_app));
     if(str_eq(app, "terminal")) window_focus("shell");
     else if(str_eq(app, "inspector") || str_eq(app, "taskman")) window_focus("inspector");
-    else if(str_eq(app, "editor") || str_eq(app, "rusa") || str_eq(app, "files")) window_focus("editor");
-    else if(str_eq(app, "network") || str_eq(app, "privacy") || str_eq(app, "saver")) window_focus("network");
+    else if(str_eq(app, "editor") || str_eq(app, "rusa") || str_eq(app, "files") ||
+            str_eq(app, "projects") || str_eq(app, "packages")) window_focus("editor");
+    else if(str_eq(app, "network") || str_eq(app, "privacy") || str_eq(app, "saver") ||
+            str_eq(app, "logs") || str_eq(app, "security") || str_eq(app, "events") ||
+            str_eq(app, "storage")) window_focus("network");
 }
 
 static void draw_dock_item(uint32_t x, const char* app, const char* label, uint32_t color){
@@ -358,6 +579,32 @@ static void draw_icon_art(uint32_t x, uint32_t y, const char* app, uint32_t colo
         fb_fill_rect(x + 20, y + 18, 18, 3, 0xFFFFFF);
         fb_fill_rect(x + 20, y + 26, 18, 3, 0xFFFFFF);
         fb_fill_rect(x + 20, y + 34, 12, 3, 0xFFFFFF);
+    } else if(str_eq(app, "projects")){
+        fb_fill_rect(x + 10, y + 12, 38, 28, color);
+        fb_draw_text(x + 20, y + 30, "P", 0xFFFFFF);
+    } else if(str_eq(app, "packages")){
+        fb_fill_rect(x + 12, y + 14, 34, 28, color);
+        fb_fill_rect(x + 18, y + 8, 22, 8, color);
+        fb_draw_text(x + 22, y + 30, "K", 0xFFFFFF);
+    } else if(str_eq(app, "logs")){
+        fb_fill_rect(x + 12, y + 8, 34, 38, color);
+        fb_fill_rect(x + 18, y + 18, 22, 3, 0xFFFFFF);
+        fb_fill_rect(x + 18, y + 28, 22, 3, 0xFFFFFF);
+        fb_fill_rect(x + 18, y + 38, 16, 3, 0xFFFFFF);
+    } else if(str_eq(app, "security")){
+        fb_fill_rect(x + 14, y + 18, 30, 24, color);
+        fb_fill_rect(x + 22, y + 8, 14, 14, color);
+        fb_draw_text(x + 23, y + 34, "S", 0xFFFFFF);
+    } else if(str_eq(app, "events")){
+        fb_fill_rect(x + 14, y + 12, 8, 8, color);
+        fb_fill_rect(x + 36, y + 12, 8, 8, color);
+        fb_fill_rect(x + 25, y + 34, 8, 8, color);
+        fb_fill_rect(x + 20, y + 18, 20, 4, color);
+        fb_fill_rect(x + 28, y + 22, 4, 16, color);
+    } else if(str_eq(app, "storage")){
+        fb_fill_rect(x + 12, y + 14, 34, 28, color);
+        fb_fill_rect(x + 16, y + 34, 26, 4, 0xFFFFFF);
+        fb_fill_rect(x + 36, y + 20, 4, 4, 0xFFFFFF);
     } else {
         fb_fill_rect(x + 12, y + 10, 34, 34, color);
     }
@@ -385,6 +632,7 @@ static void draw_mode_button(uint32_t x, uint32_t y, uint32_t w, const char* lab
 
 static void draw_editor_surface(void){
     char prefix[8];
+    char line_info[36];
     fb_fill_rect(226, 328, 700, 260, 0xFFFFFF);
     fb_fill_rect(226, 328, 150, 260, 0x26313C);
     fb_draw_text(242, 352, "Explorer", 0xCFE8FF);
@@ -392,22 +640,32 @@ static void draw_editor_surface(void){
     fb_draw_text(242, 420, editor_dirty ? "unsaved" : "saved", editor_dirty ? 0xFFD28A : 0xCFE8FF);
     fb_draw_text(242, 454, editor_focused ? "typing on" : "click page", 0xCFE8FF);
     fb_fill_rect(388, 346, 518, 220, 0xF8FAFC);
-    for(uint32_t row=0; row<GUI_EDITOR_LINES; row++){
+    for(uint32_t row=0; row<GUI_EDITOR_VISIBLE_LINES; row++){
+        uint32_t doc_row = editor_top + row;
         uint32_t y = 372 + row * 20;
-        prefix[0] = (row == editor_line && editor_focused) ? '>' : ' ';
-        prefix[1] = (char)('1' + row);
-        prefix[2] = ' ';
-        prefix[3] = 0;
+        prefix[0] = (doc_row == editor_line && editor_focused) ? '>' : ' ';
+        editor_line_label(doc_row, prefix + 1, sizeof(prefix) - 1);
         fb_draw_text(404, y, prefix, 0x6A7580);
-        fb_draw_text(432, y, editor_buf[row], 0x223040);
-        if(row == editor_line && editor_focused){
-            uint32_t cx = 432 + editor_col * 6;
+        fb_draw_text(438, y, editor_buf[doc_row], 0x223040);
+        if(doc_row == editor_line && editor_focused){
+            uint32_t cx = 438 + editor_col * GUI_FONT_ADVANCE;
             if(cx > 894) cx = 894;
-            fb_fill_rect(cx, y - 10, 2, 14, 0x111820);
+            fb_fill_rect(cx, y, 2, 8, 0x111820);
         }
     }
-    fb_draw_text(410, 562, editor_mode ? "Code mode: arrows edit, Enter newline, Save writes demo.rusa" :
-                                      "Paper mode: arrows edit, Enter newline, Save writes notes.txt", 0x2E6B4C);
+    fb_fill_rect(912, 346, 6, 220, 0xD0D8E0);
+    fb_fill_rect(912, 346 + (editor_top * 180) / (GUI_EDITOR_MAX_LINES - GUI_EDITOR_VISIBLE_LINES),
+                 6, 40, 0x536070);
+    copy_text(line_info, "Line ", sizeof(line_info));
+    char num[8];
+    u32_text(editor_line + 1, num, sizeof(num));
+    append_text(line_info, num, sizeof(line_info));
+    append_text(line_info, "/", sizeof(line_info));
+    u32_text(GUI_EDITOR_MAX_LINES, num, sizeof(num));
+    append_text(line_info, num, sizeof(line_info));
+    fb_draw_text(410, 562, line_info, 0x2E6B4C);
+    fb_draw_text(538, 562, editor_mode ? "Code: arrows/wheel/Page edit, Save writes demo.rusa" :
+                                      "Paper: arrows/wheel/Page edit, Save writes notes.txt", 0x2E6B4C);
 }
 
 static void draw_rusa_surface(void){
@@ -428,10 +686,10 @@ static void draw_rusa_surface(void){
         fb_draw_text(426, 448, "Use Open Terminal for the matching docs command.", 0x223040);
     } else if(rusa_tab == 3){
         fb_draw_text(426, 414, "Check: validates /home/projects/demo.rusa", 0x223040);
-        fb_draw_text(426, 448, "Friendly errors include file, line, column, caret.", 0x223040);
+        fb_draw_text(426, 448, rusa_view, 0x223040);
     } else if(rusa_tab == 4){
         fb_draw_text(426, 414, "Run: executes the source parser and scanner gate.", 0x223040);
-        fb_draw_text(426, 448, "Events and imports load from source files.", 0x223040);
+        fb_draw_text(426, 448, rusa_view, 0x223040);
     } else if(rusa_tab == 5){
         fb_draw_text(426, 414, "Diagnostics: last-error and open-error workflow.", 0x223040);
         fb_draw_text(426, 448, "Goal: plain English, clickable jump surface next.", 0x223040);
@@ -444,25 +702,40 @@ static void draw_rusa_surface(void){
 static void draw_active_app_detail(void){
     char num[16];
     char line[72];
-    fb_fill_rect(174, 72, 820, 594, 0x0C1118);
-    fb_fill_rect(178, 76, 812, 586, 0xEEF2F6);
-    fb_fill_rect(178, 76, 812, 36, 0x1E2A36);
+    if(active_is("desktop") || !app_is_open(active_app)){
+        fb_draw_text(204, 74, "Dynamic desktop wallpaper", 0xFFFFFF);
+        fb_draw_text(204, 102, "Click an icon or taskbar app to open a window.", 0xFFFFFF);
+        return;
+    }
+    fb_fill_rect(gui_win_x, gui_win_y, gui_win_w, gui_win_h, 0x0C1118);
+    fb_fill_rect(gui_win_x + 4, gui_win_y + 4, gui_win_w - 8, gui_win_h - 8, 0xEEF2F6);
+    fb_fill_rect(gui_win_x + 4, gui_win_y + 4, gui_win_w - 8, 36, 0x1E2A36);
     fb_draw_text(198, 92, app_title(), 0xFFFFFF);
     fb_fill_rect(946, 84, 28, 22, 0xA84A4A);
     fb_fill_rect(914, 84, 28, 22, 0xC8A848);
     fb_fill_rect(882, 84, 28, 22, 0x4A9A68);
     fb_draw_text(956, 100, "x", 0xFFFFFF);
-    if(!app_is_open(active_app)){
-        fb_draw_text(226, 132, "No app window is open. Click an icon to open it.", 0x223040);
-        return;
-    }
     fb_draw_text(226, 132, "GUI window. Use buttons below, or Open Terminal for command mode.", 0x223040);
     draw_button(812, 124, 130, "Open Terminal", 0x345A7A);
     draw_button(652, 124, 130, "Close Window", 0xA84A4A);
     if(active_is("files")){
-        draw_app_line(1, "Workspace", "/home  /home/projects  /pkg  /var/log");
-        draw_app_line(2, "Preview", "readme.txt  projects  math  downloads");
-        draw_app_line(3, "Action", "Open Terminal runs: tree /home");
+        char name[40];
+        char row[80];
+        int type = 0;
+        draw_app_line(1, "Folder", file_dir);
+        draw_app_line(2, "Selected", file_selected);
+        draw_button(226, 268, 96, "Open", 0x3C704C);
+        draw_button(346, 268, 96, "Edit", 0x345A7A);
+        draw_button(466, 268, 116, "Terminal", 0x725C9A);
+        fb_fill_rect(226, 328, 700, 220, 0xF8FAFC);
+        for(uint32_t i=0; i<7; i++){
+            if(fs_child_name(file_dir, (int)i, name, sizeof(name), &type) != 0)
+                break;
+            copy_text(row, type == 1 ? "[dir]  " : "[file] ", sizeof(row));
+            append_text(row, name, sizeof(row));
+            fb_draw_text(250, 358 + i * 24, row, 0x223040);
+        }
+        fb_draw_text(250, 536, "Click a row, Open enters folders, Edit opens files in Editor.", 0x2E6B4C);
     } else if(active_is("taskman")){
         struct process_info* compute = process_find("compute");
         u32_text(compute ? compute->ticks : 0, num, sizeof(num));
@@ -493,7 +766,10 @@ static void draw_active_app_detail(void){
         append_text(line, fb_cursor_style(), sizeof(line));
         append_text(line, "  use: gui cursor dot", sizeof(line));
         draw_app_line(2, "Pointer", line);
-        draw_app_line(3, "Action", "Open Terminal runs: privacy status");
+        draw_button(226, 268, 96, "Security", 0x884C4C);
+        draw_button(346, 268, 96, "Events", 0x725C9A);
+        draw_button(466, 268, 96, "Storage", 0x345A7A);
+        draw_app_line(4, "Action", "Open Terminal runs: privacy status");
     } else if(active_is("network")){
         u32_text(net_packet_count(), num, sizeof(num));
         copy_text(line, net_is_link_up() ? "link up packets=" : "link down packets=", sizeof(line));
@@ -501,19 +777,65 @@ static void draw_active_app_detail(void){
         draw_app_line(1, "Stack", line);
         draw_app_line(2, "Shield", "privacy gate mask ports packet queue");
         draw_app_line(3, "Action", "Open Terminal runs: net status");
+    } else if(active_is("projects")){
+        draw_app_line(1, "Workspace", "/home/projects");
+        draw_app_line(2, "Tools", "new run docs edit");
+        draw_button(226, 268, 96, "List", 0x345A7A);
+        draw_button(346, 268, 116, "New Demo", 0x3C704C);
+        draw_button(486, 268, 96, "Run", 0x725C9A);
+        draw_app_line(4, "Action", "Open Terminal runs: project list");
+    } else if(active_is("packages")){
+        draw_app_line(1, "Registry", "core editor math network gui rusa docs");
+        draw_app_line(2, "Compat", "pkg compat checks ABI and architecture");
+        draw_button(226, 268, 96, "List", 0x345A7A);
+        draw_button(346, 268, 96, "Compat", 0x3C704C);
+        draw_button(466, 268, 116, "Rusa Docs", 0x725C9A);
+        draw_app_line(4, "Action", "Open Terminal runs: pkg list");
+    } else if(active_is("logs")){
+        draw_app_line(1, "Streams", "system security network");
+        draw_app_line(2, "Use", "audit boot net privacy package events");
+        draw_button(226, 268, 96, "System", 0x345A7A);
+        draw_button(346, 268, 96, "Security", 0x884C4C);
+        draw_button(466, 268, 96, "Network", 0x386878);
+        draw_app_line(4, "Action", "Open Terminal runs: log show system");
+    } else if(active_is("security")){
+        draw_app_line(1, "Mode", "secure mode capabilities audit namespace guard");
+        draw_app_line(2, "Users", "root guest capability grants");
+        draw_button(226, 268, 96, "Status", 0x345A7A);
+        draw_button(346, 268, 96, "Audit", 0x884C4C);
+        draw_button(466, 268, 96, "Users", 0x725C9A);
+        draw_app_line(4, "Action", "Open Terminal runs: security status");
+    } else if(active_is("events")){
+        draw_app_line(1, "Rules", "service net fs scheduler Rusa handlers");
+        draw_app_line(2, "Model", "persistent event reactions from source files");
+        draw_button(226, 268, 96, "List", 0x345A7A);
+        draw_button(346, 268, 96, "Emit", 0x3C704C);
+        draw_button(466, 268, 116, "Rusa Ev", 0x725C9A);
+        draw_app_line(4, "Action", "Open Terminal runs: event list");
+    } else if(active_is("storage")){
+        draw_app_line(1, "Block", "8-sector RAM disk plus VFS bridges");
+        draw_app_line(2, "Handles", "fd open/read/write/close per process");
+        draw_button(226, 268, 96, "Block", 0x345A7A);
+        draw_button(346, 268, 96, "Mounts", 0x3C704C);
+        draw_button(466, 268, 96, "FDs", 0x725C9A);
+        draw_app_line(4, "Action", "Open Terminal runs: block status");
     } else if(active_is("saver")){
         draw_app_line(1, "Modes", "lava rain stars waves");
-        draw_app_line(2, "Backdrop", saver_backdrop ? "dynamic backdrop on" : "dynamic backdrop off");
+        if(saver_backdrop)
+            draw_app_line(2, "Wallpaper", saver_live ? "slow live wallpaper on" : "calm still wallpaper on");
+        else
+            draw_app_line(2, "Wallpaper", "dynamic wallpaper off");
         draw_button(226, 268, 72, "Lava", 0x8A4A40);
         draw_button(318, 268, 72, "Rain", 0x3A86A8);
         draw_button(410, 268, 72, "Stars", 0x604A88);
         draw_button(502, 268, 72, "Waves", 0x386878);
-        draw_button(594, 268, 92, "Preview", 0x725C9A);
-        draw_button(706, 268, 72, "Off", 0x555A60);
+        draw_button(594, 268, 72, "Live", 0x3C704C);
+        draw_button(686, 268, 92, "Preview", 0x725C9A);
+        draw_button(798, 268, 72, "Off", 0x555A60);
         fb_fill_rect(226, 328, 700, 220, 0x101820);
-        fb_draw_text(250, 358, "Screensaver backdrop runs behind windows.", 0xCFE8FF);
-        fb_draw_text(250, 398, "Click Lava, Rain, Stars, or Waves for desktop backdrop.", 0xFFFFFF);
-        fb_draw_text(250, 438, "Click Preview for the full animated saver command.", 0xFFFFFF);
+        fb_draw_text(250, 358, "Wallpaper is calm by default to avoid blinking.", 0xCFE8FF);
+        fb_draw_text(250, 398, "Click Lava, Rain, Stars, or Waves for still wallpaper.", 0xFFFFFF);
+        fb_draw_text(250, 438, "Use gui wallpaper live MODE for slow animation.", 0xFFFFFF);
         draw_app_line(4, "Action", "Open Terminal runs: fb saver MODE 12");
     } else if(active_is("editor")){
         draw_app_line(1, "Mode", editor_mode ? "code workspace" : "paper drafting");
@@ -529,15 +851,19 @@ static void draw_active_app_detail(void){
         draw_app_line(1, "System", "memory scheduler trace replay logs");
         draw_app_line(2, "Terminal", "Enter opens: inspect memory");
     } else {
-        draw_app_line(1, "Shell", "object language commands live here");
-        draw_app_line(2, "Terminal", "Click terminal or press Enter");
+        draw_app_line(1, "Shell", "GUI terminal surface");
+        draw_app_line(2, "Last", terminal_view);
+        fb_fill_rect(226, 228, 700, 330, 0x101820);
+        fb_draw_text(250, 260, "Tabla Rusa Terminal", 0x8EE8A0);
+        fb_draw_text(250, 304, terminal_view, 0xFFFFFF);
+        fb_draw_text(250, 348, "Press Enter or Open Terminal for full command input.", 0xCFE8FF);
     }
 }
 
-static void gui_draw_desktop(void){
+static void gui_draw_desktop_core(int emit_console){
     const struct window_info* focused = window_focused();
     if(saver_backdrop)
-        fb_draw_saver_backdrop(saver_hint);
+        fb_draw_wallpaper(saver_hint, saver_live);
     else
         fb_clear(0x14324A);
     fb_fill_rect(0, 0, 1024, 34, 0x151B22);
@@ -557,6 +883,9 @@ static void gui_draw_desktop(void){
     draw_desktop_icon(882, 70, "network", "Network", 0x3A86A8);
     draw_desktop_icon(882, 170, "saver", "Saver", 0x8A66B8);
     draw_desktop_icon(882, 270, "taskman", "Tasks", 0x4A9A68);
+    draw_desktop_icon(882, 370, "projects", "Projects", 0x3C704C);
+    draw_desktop_icon(882, 470, "packages", "Packages", 0x725C9A);
+    draw_desktop_icon(882, 570, "logs", "Logs", 0x884C4C);
     draw_active_app_detail();
     fb_draw_text(26, 746, "Start", 0xFFFFFF);
     draw_dock_item(124, "files", "Files", 0x385C82);
@@ -574,6 +903,8 @@ static void gui_draw_desktop(void){
         fb_draw_text(778, 746, "Click launches app command", 0xFFFFFF);
     }
     fb_set_mouse(mouse_x(), mouse_y(), mouse_buttons());
+    if(!emit_console)
+        return;
     console_clear_output();
     console_puts("+------------------------------------------------------------------------------+\n");
     console_puts("| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |\n");
@@ -588,7 +919,7 @@ static void gui_draw_desktop(void){
     console_write_dec((uint32_t)focused->y);
     console_puts("\n");
     console_puts("|                                                                              |\n");
-    console_puts("|  desktop icons: Files Terminal Math Rusa Settings Editor Tasks Network Saver |\n");
+    console_puts("|  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |\n");
     console_puts("|  app window: selected icon opens a focused GUI surface                       |\n");
     console_puts("|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |\n");
     console_puts("|  Click or Enter launches the selected app's shell command                    |\n");
@@ -597,15 +928,37 @@ static void gui_draw_desktop(void){
         console_puts("| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |\n");
 }
 
+static void gui_draw_desktop(void){
+    gui_draw_desktop_core(1);
+}
+
 void gui_init(void){
     fs_mkdir("/system/gui");
     fs_write("/system/gui/state.txt", "state=ready\nautostart=on\nsurface=desktop\npointer=crosshair\n");
+    gui_load_settings();
     editor_seed();
+    editor_load_file();
     fs_append_line("/var/log/system.log", "gui: text compositor foundation ready");
 }
 
 int gui_is_running(void){
     return running;
+}
+
+int gui_is_desktop_visible(void){
+    return active_is("desktop") || !app_is_open(active_app);
+}
+
+void gui_tick(void){
+    uint32_t now = timer_ticks();
+    if(!running || !desktop_mode || !saver_backdrop || !saver_live)
+        return;
+    if(gui_busy_until && now < gui_busy_until)
+        return;
+    if(now == saver_last_tick || (now - saver_last_tick) < GUI_WALLPAPER_TICKS)
+        return;
+    saver_last_tick = now;
+    gui_draw_desktop_core(0);
 }
 
 void gui_cmd(char* arg){
@@ -620,6 +973,10 @@ void gui_cmd(char* arg){
         console_puts(desktop_mode ? "desktop" : "shell");
         console_puts(" app=");
         console_puts(active_app);
+        console_puts(" saver=");
+        console_puts(saver_hint);
+        console_puts(saver_backdrop ? " backdrop=on" : " backdrop=off");
+        console_puts(saver_live ? " live=on" : " live=off");
         console_puts(" backend=soft-framebuffer+vga-text\n");
         console_puts("objects: compositor window-manager tab-strip input-router desktop screensaver\n");
         console_puts("crosshair=");
@@ -632,6 +989,9 @@ void gui_cmd(char* arg){
     } else if(str_eq(action, "start")){
         running = 1;
         autostarted = 1;
+        desktop_mode = 1;
+        copy_text(active_app, "desktop", sizeof(active_app));
+        editor_focused = 0;
         service_set_running("gui", 1);
         process_set_running("gui", 1);
         fs_write("/system/gui/state.txt", "state=running\nautostart=on\nsurface=desktop\npointer=crosshair\n");
@@ -652,13 +1012,10 @@ void gui_cmd(char* arg){
     } else if(str_eq(action, "app")){
         const char* name = first_arg(rest, &rest);
         if(name[0] == 0){
-            console_puts("usage: gui app files|editor|tasks|math|rusa|settings|privacy|net|saver|terminal\n");
+            console_puts("usage: gui app files|editor|projects|packages|logs|security|events|storage|tasks|math|rusa|settings|privacy|net|saver|terminal\n");
             return;
         }
-        if(str_eq(name, "tasks")) name = "taskman";
-        if(str_eq(name, "net")) name = "network";
-        if(str_eq(name, "settings")) name = "privacy";
-        if(str_eq(name, "term")) name = "terminal";
+        name = canonical_app(name);
         gui_focus_app(name);
         gui_draw_desktop();
     } else if(str_eq(action, "cursor") || str_eq(action, "pointer")){
@@ -668,18 +1025,33 @@ void gui_cmd(char* arg){
             return;
         }
         fb_set_cursor_style(style);
+        gui_save_settings();
         gui_focus_app("privacy");
         copy_text(launch_notice, "cursor style changed", sizeof(launch_notice));
         gui_draw_desktop();
-    } else if(str_eq(action, "backdrop")){
+    } else if(str_eq(action, "backdrop") || str_eq(action, "wallpaper")){
         const char* name = first_arg(rest, &rest);
+        char* tail;
+        const char* option;
+        int live = 0;
         if(str_eq(name, "off")){
             saver_backdrop = 0;
-            copy_text(launch_notice, "backdrop off", sizeof(launch_notice));
+            saver_live = 0;
+            gui_save_settings();
+            copy_text(launch_notice, "wallpaper off", sizeof(launch_notice));
         } else {
+            if(str_eq(name, "live")){
+                live = 1;
+                name = first_arg(rest, &rest);
+            }
+            option = first_arg(rest, &tail);
+            if(str_eq(option, "live") || str_eq(option, "animate") || str_eq(option, "animated"))
+                live = 1;
             copy_text(saver_hint, name[0] ? name : "lava", sizeof(saver_hint));
             saver_backdrop = 1;
-            copy_text(launch_notice, "dynamic backdrop on", sizeof(launch_notice));
+            saver_live = live;
+            gui_save_settings();
+            copy_text(launch_notice, saver_live ? "slow live wallpaper on" : "calm wallpaper on", sizeof(launch_notice));
         }
         gui_focus_app("saver");
         gui_draw_desktop();
@@ -691,20 +1063,36 @@ void gui_cmd(char* arg){
         } else if(str_eq(mode, "code")){
             editor_set_mode(1);
             copy_text(launch_notice, "editor code mode", sizeof(launch_notice));
+        } else if(str_eq(mode, "open")){
+            const char* path = first_arg(rest, &rest);
+            editor_open_path(path[0] ? path : editor_current_path);
+            copy_text(launch_notice, "editor file opened", sizeof(launch_notice));
+        } else if(str_eq(mode, "save")){
+            const char* path = first_arg(rest, &rest);
+            if(path[0])
+                copy_text(editor_current_path, path, sizeof(editor_current_path));
+            editor_save_file();
+            gui_save_settings();
+            copy_text(launch_notice, "editor file saved", sizeof(launch_notice));
         } else if(str_eq(mode, "new")){
+            const char* path = first_arg(rest, &rest);
+            if(path[0])
+                copy_text(editor_current_path, path, sizeof(editor_current_path));
             editor_seed();
             editor_dirty = 1;
             copy_text(launch_notice, "new editor file", sizeof(launch_notice));
-        } else if(str_eq(mode, "open")){
-            editor_load_file();
-            copy_text(launch_notice, "editor file opened", sizeof(launch_notice));
-        } else if(str_eq(mode, "save")){
-            editor_save_file();
-            copy_text(launch_notice, "editor file saved", sizeof(launch_notice));
+        } else if(str_eq(mode, "copy")){
+            copy_text(editor_clipboard, editor_buf[editor_line], sizeof(editor_clipboard));
+            copy_text(launch_notice, "line copied", sizeof(launch_notice));
+        } else if(str_eq(mode, "paste")){
+            copy_text(editor_buf[editor_line], editor_clipboard, sizeof(editor_buf[editor_line]));
+            editor_dirty = 1;
+            copy_text(launch_notice, "line pasted", sizeof(launch_notice));
         } else if(mode[0]){
-            console_puts("usage: gui editor paper|code|new|open|save\n");
+            console_puts("usage: gui editor paper|code|new [PATH]|open [PATH]|save [PATH]|copy|paste\n");
             return;
         }
+        gui_save_settings();
         gui_focus_app("editor");
         gui_draw_desktop();
     } else if(str_eq(action, "rusa")){
@@ -725,18 +1113,25 @@ void gui_cmd(char* arg){
     } else if(str_eq(action, "close")){
         const char* name = first_arg(rest, &rest);
         if(name[0] == 0) name = active_app;
-        if(str_eq(name, "settings")) name = "privacy";
-        if(str_eq(name, "tasks")) name = "taskman";
+        name = canonical_app(name);
         app_close(name);
         copy_text(launch_notice, "window closed", sizeof(launch_notice));
         gui_draw_desktop();
     } else if(str_eq(action, "saver")){
         const char* name = first_arg(rest, &rest);
+        const char* mode = first_arg(rest, &rest);
         copy_text(saver_hint, name[0] ? name : "lava", sizeof(saver_hint));
         gui_focus_app("saver");
-        fb_run_saver(saver_hint, 12);
-        fb_draw_text(28, 28, "Tabla Rusa OS screensaver - Esc returns to desktop", 0xFFFFFF);
-        fb_set_mouse(mouse_x(), mouse_y(), mouse_buttons());
+        if(str_eq(mode, "backdrop") || str_eq(mode, "live")){
+            saver_backdrop = 1;
+            saver_live = str_eq(mode, "live");
+            copy_text(launch_notice, saver_live ? "slow live wallpaper" : "calm wallpaper", sizeof(launch_notice));
+            gui_draw_desktop();
+        } else {
+            fb_run_saver(saver_hint, 12);
+            fb_draw_text(28, 28, "Tabla Rusa OS screensaver - Esc returns to desktop", 0xFFFFFF);
+            fb_set_mouse(mouse_x(), mouse_y(), mouse_buttons());
+        }
     } else if(str_eq(action, "windows") || str_eq(action, "tabs")){
         window_list();
     } else if(str_eq(action, "tab") || str_eq(action, "next")){
@@ -757,10 +1152,29 @@ void gui_cmd(char* arg){
         first_arg(rest, &yarg);
         uint32_t y = parse_u32(yarg);
         if(name[0] == 0){
-            console_puts("usage: gui move WINDOW X Y\n");
+            console_puts("usage: gui move WINDOW|active X Y\n");
             return;
         }
+        if(str_eq(name, "active")){
+            gui_win_x = x;
+            gui_win_y = y;
+        }
         window_move(name, (int)x, (int)y);
+        gui_draw_desktop();
+    } else if(str_eq(action, "resize")){
+        const char* name = first_arg(rest, &rest);
+        uint32_t w = parse_u32(first_arg(rest, &rest));
+        uint32_t h = parse_u32(first_arg(rest, &rest));
+        if(w < 520) w = 520;
+        if(h < 380) h = 380;
+        if(w > 900) w = 900;
+        if(h > 640) h = 640;
+        if(name[0] == 0 || str_eq(name, "active")){
+            gui_win_w = w;
+            gui_win_h = h;
+        } else {
+            window_resize(name, (int)w, (int)h);
+        }
         gui_draw_desktop();
     } else if(str_eq(action, "click")){
         uint32_t x = parse_u32(first_arg(rest, &rest));
@@ -770,7 +1184,7 @@ void gui_cmd(char* arg){
         mouse_button(0, 0);
         gui_draw_desktop();
     } else {
-        console_puts("usage: gui status | start | stop | desktop | draw | app NAME | editor MODE | rusa TAB | saver [NAME] | windows | tab | focus NAME | move NAME X Y | click X Y\n");
+        console_puts("usage: gui status | start | stop | desktop | draw | app NAME | editor MODE | rusa TAB | wallpaper MODE|off | saver [NAME] [backdrop] | windows | tab | focus NAME | move NAME X Y | resize active W H | click X Y\n");
     }
 }
 
@@ -778,6 +1192,8 @@ void gui_enter_desktop(void){
     running = 1;
     autostarted = 1;
     desktop_mode = 1;
+    copy_text(active_app, "desktop", sizeof(active_app));
+    editor_focused = 0;
     launch_notice[0] = 0;
     service_set_running("gui", 1);
     process_set_running("gui", 1);
@@ -788,8 +1204,9 @@ void gui_enter_desktop(void){
 
 static void editor_clamp_cursor(void){
     uint32_t len = text_len32(editor_buf[editor_line]);
-    if(editor_line >= GUI_EDITOR_LINES) editor_line = GUI_EDITOR_LINES - 1;
+    if(editor_line >= GUI_EDITOR_MAX_LINES) editor_line = GUI_EDITOR_MAX_LINES - 1;
     if(editor_col > len) editor_col = len;
+    editor_ensure_visible();
 }
 
 static void editor_insert_char(char c){
@@ -817,11 +1234,32 @@ static void editor_backspace(void){
         for(uint32_t i=0; i<take; i++)
             editor_buf[editor_line - 1][prev_len + i] = line[i];
         editor_buf[editor_line - 1][prev_len + take] = 0;
-        for(uint32_t row=editor_line; row + 1 < GUI_EDITOR_LINES; row++)
+        for(uint32_t row=editor_line; row + 1 < GUI_EDITOR_MAX_LINES; row++)
             copy_text(editor_buf[row], editor_buf[row + 1], sizeof(editor_buf[row]));
-        editor_buf[GUI_EDITOR_LINES - 1][0] = 0;
+        editor_buf[GUI_EDITOR_MAX_LINES - 1][0] = 0;
         editor_line--;
         editor_col = prev_len;
+        editor_dirty = 1;
+    }
+}
+
+static void editor_delete(void){
+    char* line = editor_buf[editor_line];
+    uint32_t len = text_len32(line);
+    if(editor_col < len){
+        for(uint32_t i=editor_col; i<len; i++)
+            line[i] = line[i + 1];
+        editor_dirty = 1;
+    } else if(editor_line + 1 < GUI_EDITOR_MAX_LINES && editor_buf[editor_line + 1][0]){
+        uint32_t room = GUI_EDITOR_COLS - len - 1;
+        uint32_t take = text_len32(editor_buf[editor_line + 1]);
+        if(take > room) take = room;
+        for(uint32_t i=0; i<take; i++)
+            line[len + i] = editor_buf[editor_line + 1][i];
+        line[len + take] = 0;
+        for(uint32_t row=editor_line + 1; row + 1 < GUI_EDITOR_MAX_LINES; row++)
+            copy_text(editor_buf[row], editor_buf[row + 1], sizeof(editor_buf[row]));
+        editor_buf[GUI_EDITOR_MAX_LINES - 1][0] = 0;
         editor_dirty = 1;
     }
 }
@@ -830,10 +1268,10 @@ static void editor_newline(void){
     char tail[GUI_EDITOR_COLS];
     char* line = editor_buf[editor_line];
     uint32_t len = text_len32(line);
-    if(editor_line + 1 >= GUI_EDITOR_LINES) return;
+    if(editor_line + 1 >= GUI_EDITOR_MAX_LINES) return;
     copy_text(tail, line + editor_col, sizeof(tail));
     line[editor_col] = 0;
-    for(uint32_t row=GUI_EDITOR_LINES - 1; row>editor_line + 1; row--)
+    for(uint32_t row=GUI_EDITOR_MAX_LINES - 1; row>editor_line + 1; row--)
         copy_text(editor_buf[row], editor_buf[row - 1], sizeof(editor_buf[row]));
     copy_text(editor_buf[editor_line + 1], tail, sizeof(editor_buf[editor_line + 1]));
     editor_line++;
@@ -844,6 +1282,20 @@ static void editor_newline(void){
 
 static int editor_handle_key(int key){
     if(!(active_is("editor") && app_is_open("editor") && editor_focused)) return 0;
+    gui_note_activity();
+    if(keyboard_ctrl_down() && (key == 'c' || key == 'C')){
+        copy_text(editor_clipboard, editor_buf[editor_line], sizeof(editor_clipboard));
+        copy_text(launch_notice, "line copied", sizeof(launch_notice));
+        gui_draw_desktop_core(0);
+        return 1;
+    }
+    if(keyboard_ctrl_down() && (key == 'v' || key == 'V')){
+        copy_text(editor_buf[editor_line], editor_clipboard, sizeof(editor_buf[editor_line]));
+        editor_dirty = 1;
+        copy_text(launch_notice, "line pasted", sizeof(launch_notice));
+        gui_draw_desktop_core(0);
+        return 1;
+    }
     if(key == KB_KEY_LEFT){
         if(editor_col > 0) editor_col--;
         else if(editor_line > 0){
@@ -853,7 +1305,7 @@ static int editor_handle_key(int key){
     } else if(key == KB_KEY_RIGHT){
         uint32_t len = text_len32(editor_buf[editor_line]);
         if(editor_col < len) editor_col++;
-        else if(editor_line + 1 < GUI_EDITOR_LINES){
+        else if(editor_line + 1 < GUI_EDITOR_MAX_LINES){
             editor_line++;
             editor_col = 0;
         }
@@ -861,8 +1313,18 @@ static int editor_handle_key(int key){
         if(editor_line > 0) editor_line--;
         editor_clamp_cursor();
     } else if(key == KB_KEY_DOWN){
-        if(editor_line + 1 < GUI_EDITOR_LINES) editor_line++;
+        if(editor_line + 1 < GUI_EDITOR_MAX_LINES) editor_line++;
         editor_clamp_cursor();
+    } else if(key == KB_KEY_PAGE_UP){
+        editor_scroll(GUI_EDITOR_VISIBLE_LINES);
+    } else if(key == KB_KEY_PAGE_DOWN){
+        editor_scroll(-((int)GUI_EDITOR_VISIBLE_LINES));
+    } else if(key == KB_KEY_HOME){
+        editor_col = 0;
+    } else if(key == KB_KEY_END){
+        editor_col = text_len32(editor_buf[editor_line]);
+    } else if(key == KB_KEY_DELETE){
+        editor_delete();
     } else if(key == '\n'){
         editor_newline();
     } else if(key == 8 || key == 127){
@@ -872,7 +1334,8 @@ static int editor_handle_key(int key){
     } else {
         return 0;
     }
-    gui_draw_desktop();
+    editor_clamp_cursor();
+    gui_draw_desktop_core(0);
     console_input_write("Tabla Editor - typing in GUI document");
     return 1;
 }
@@ -881,10 +1344,13 @@ int gui_key_captures(int key){
     if(!(active_is("editor") && app_is_open("editor") && editor_focused)) return 0;
     return key == '\n' || key == 8 || key == 127 ||
            key == KB_KEY_LEFT || key == KB_KEY_RIGHT || key == KB_KEY_UP || key == KB_KEY_DOWN ||
+           key == KB_KEY_PAGE_UP || key == KB_KEY_PAGE_DOWN ||
+           key == KB_KEY_HOME || key == KB_KEY_END || key == KB_KEY_DELETE ||
            (key >= 32 && key <= 126);
 }
 
 void gui_handle_key(int key){
+    gui_note_activity();
     if(editor_handle_key(key))
         return;
     if(key == '\t' || key == KB_KEY_RIGHT || key == KB_KEY_DOWN){
@@ -925,6 +1391,35 @@ void gui_handle_key(int key){
     console_input_write("GUI desktop - Enter opens terminal");
 }
 
+int gui_handle_scroll(int amount){
+    if(!(desktop_mode && active_is("editor") && app_is_open("editor")))
+        return 0;
+    if(mouse_x() < 388 || mouse_x() >= 926 || mouse_y() < 346 || mouse_y() >= 566)
+        return 0;
+    gui_note_activity();
+    editor_focused = 1;
+    editor_scroll(amount > 0 ? 3 : -3);
+    gui_draw_desktop_core(0);
+    console_input_write("Tabla Editor - scrolled document");
+    return 1;
+}
+
+void gui_handle_drag(uint32_t x, uint32_t y, uint32_t buttons){
+    if(!desktop_mode || !app_is_open(active_app))
+        return;
+    if(!(buttons & 1)){
+        gui_dragging = 0;
+        return;
+    }
+    if(gui_dragging){
+        gui_win_x = x > 260 ? x - 260 : 20;
+        gui_win_y = y > 24 ? y - 24 : 40;
+        if(gui_win_x + gui_win_w > 1004) gui_win_x = 1004 - gui_win_w;
+        if(gui_win_y + gui_win_h > 710) gui_win_y = 710 - gui_win_h;
+        gui_draw_desktop_core(0);
+    }
+}
+
 static int icon_hit(uint32_t x, uint32_t y, uint32_t ix, uint32_t iy){
     return x >= ix - 8 && x < ix + 96 && y >= iy - 8 && y < iy + 84;
 }
@@ -940,14 +1435,20 @@ static void gui_open_app(const char* app){
         terminal_requested = 1;
     } else if(str_eq(app, "saver")){
         saver_backdrop = 1;
-        copy_text(launch_notice, "dynamic backdrop on", sizeof(launch_notice));
+        saver_live = 0;
+        copy_text(launch_notice, "calm wallpaper controls", sizeof(launch_notice));
     } else {
         copy_text(launch_notice, "window opened", sizeof(launch_notice));
     }
 }
 
 void gui_handle_click(uint32_t x, uint32_t y){
-    if(app_is_open(active_app) && x >= 936 && x < 982 && y >= 78 && y < 114){
+    gui_note_activity();
+    if(app_is_open(active_app) && x >= gui_win_x + 18 && x < gui_win_x + gui_win_w - 92 &&
+       y >= gui_win_y + 4 && y < gui_win_y + 40){
+        gui_dragging = 1;
+        copy_text(launch_notice, "drag window", sizeof(launch_notice));
+    } else if(app_is_open(active_app) && x >= 936 && x < 982 && y >= 78 && y < 114){
         app_close(active_app);
         copy_text(launch_notice, "window closed", sizeof(launch_notice));
     } else if(app_is_open(active_app) && x >= 652 && x < 782 && y >= 124 && y < 154){
@@ -960,26 +1461,55 @@ void gui_handle_click(uint32_t x, uint32_t y){
         if(x < 312) rusa_tab = 0;
         else if(x < 412) rusa_tab = 1;
         else if(x < 498) rusa_tab = 2;
-        else if(x < 584) rusa_tab = 3;
-        else if(x < 662) rusa_tab = 4;
+        else if(x < 584){
+            rusa_tab = 3;
+            copy_text(rusa_view, "Check passed or terminal shows exact diagnostic.", sizeof(rusa_view));
+            request_terminal_command("rusa check /home/projects/demo.rusa", "rusa check");
+        }
+        else if(x < 662){
+            rusa_tab = 4;
+            copy_text(rusa_view, "Run queued: /home/projects/demo.rusa", sizeof(rusa_view));
+            request_terminal_command("rusa run /home/projects/demo.rusa", "rusa run");
+        }
         else rusa_tab = 5;
         copy_text(launch_notice, "rusa tab changed", sizeof(launch_notice));
-    } else if(active_is("saver") && app_is_open("saver") && y >= 268 && y < 296 && x >= 226 && x < 778){
-        if(x < 298){ copy_text(saver_hint, "lava", sizeof(saver_hint)); saver_backdrop = 1; }
-        else if(x < 390){ copy_text(saver_hint, "rain", sizeof(saver_hint)); saver_backdrop = 1; }
-        else if(x < 482){ copy_text(saver_hint, "stars", sizeof(saver_hint)); saver_backdrop = 1; }
-        else if(x < 574){ copy_text(saver_hint, "waves", sizeof(saver_hint)); saver_backdrop = 1; }
-        else if(x < 686){
+    } else if(active_is("files") && app_is_open("files") && y >= 268 && y < 296 && x >= 226 && x < 582){
+        if(x < 322){
+            int type = 0;
+            size_t size = 0;
+            if(fs_stat(file_selected, &type, &size) == 0 && type == 1)
+                copy_text(file_dir, file_selected, sizeof(file_dir));
+            else
+                files_open_selected_editor();
+        } else if(x < 442){
+            files_open_selected_editor();
+        } else {
+            request_terminal_command("tree /home", "tree /home");
+        }
+    } else if(active_is("files") && app_is_open("files") && y >= 358 && y < 526 && x >= 226 && x < 926){
+        files_select_index((y - 358) / 24);
+        copy_text(launch_notice, "file selected", sizeof(launch_notice));
+    } else if(active_is("saver") && app_is_open("saver") && y >= 268 && y < 296 && x >= 226 && x < 870){
+        if(x < 298){ copy_text(saver_hint, "lava", sizeof(saver_hint)); saver_backdrop = 1; saver_live = 0; }
+        else if(x < 390){ copy_text(saver_hint, "rain", sizeof(saver_hint)); saver_backdrop = 1; saver_live = 0; }
+        else if(x < 482){ copy_text(saver_hint, "stars", sizeof(saver_hint)); saver_backdrop = 1; saver_live = 0; }
+        else if(x < 574){ copy_text(saver_hint, "waves", sizeof(saver_hint)); saver_backdrop = 1; saver_live = 0; }
+        else if(x < 666){ saver_backdrop = 1; saver_live = 1; gui_save_settings(); }
+        else if(x < 778){
             copy_text(launch_notice, "screensaver preview", sizeof(launch_notice));
             terminal_requested = 1;
-        } else saver_backdrop = 0;
-        if(x < 594 || x >= 686)
-            copy_text(launch_notice, saver_backdrop ? "dynamic backdrop on" : "backdrop off", sizeof(launch_notice));
+        } else { saver_backdrop = 0; saver_live = 0; gui_save_settings(); }
+        if(x < 666 || x >= 778)
+            copy_text(launch_notice, saver_backdrop ? (saver_live ? "slow live wallpaper on" : "calm wallpaper on") : "backdrop off", sizeof(launch_notice));
+    } else if(active_is("privacy") && app_is_open("privacy") && y >= 268 && y < 296 && x >= 226 && x < 562){
+        if(x < 322) gui_open_app("security");
+        else if(x < 442) gui_open_app("events");
+        else gui_open_app("storage");
     } else if(active_is("editor") && app_is_open("editor") && x >= 388 && x < 906 && y >= 346 && y < 566){
         editor_focused = 1;
-        editor_line = (y > 362) ? (y - 362) / 20 : 0;
-        if(editor_line >= GUI_EDITOR_LINES) editor_line = GUI_EDITOR_LINES - 1;
-        editor_col = x > 432 ? (x - 432) / 6 : 0;
+        editor_line = editor_top + ((y > 372) ? (y - 372) / 20 : 0);
+        if(editor_line >= GUI_EDITOR_MAX_LINES) editor_line = GUI_EDITOR_MAX_LINES - 1;
+        editor_col = x > 438 ? (x - 438) / GUI_FONT_ADVANCE : 0;
         editor_clamp_cursor();
         copy_text(launch_notice, "editor ready for typing", sizeof(launch_notice));
     } else if(active_is("editor") && app_is_open("editor") && y >= 236 && y < 266 && x >= 226 && x < 450){
@@ -999,12 +1529,37 @@ void gui_handle_click(uint32_t x, uint32_t y){
         }
         else if(x < 562){
             editor_save_file();
+            gui_save_settings();
             copy_text(launch_notice, "document saved", sizeof(launch_notice));
         }
         else {
             copy_text(launch_notice, "opening editor", sizeof(launch_notice));
             terminal_requested = 1;
         }
+    } else if(active_is("projects") && app_is_open("projects") && y >= 268 && y < 296 && x >= 226 && x < 582){
+        if(x < 322) request_terminal_command("project list", "project list");
+        else if(x < 462) request_terminal_command("project new demo", "new demo project");
+        else request_terminal_command("project run demo", "run demo project");
+    } else if(active_is("packages") && app_is_open("packages") && y >= 268 && y < 296 && x >= 226 && x < 582){
+        if(x < 322) request_terminal_command("pkg list", "package list");
+        else if(x < 442) request_terminal_command("pkg compat", "package compat");
+        else request_terminal_command("pkg info rusa-docs", "rusa docs package");
+    } else if(active_is("logs") && app_is_open("logs") && y >= 268 && y < 296 && x >= 226 && x < 562){
+        if(x < 322) request_terminal_command("log show system", "system log");
+        else if(x < 442) request_terminal_command("log show security", "security log");
+        else request_terminal_command("log show network", "network log");
+    } else if(active_is("security") && app_is_open("security") && y >= 268 && y < 296 && x >= 226 && x < 562){
+        if(x < 322) request_terminal_command("security status", "security status");
+        else if(x < 442) request_terminal_command("security audit", "security audit");
+        else request_terminal_command("user list", "user list");
+    } else if(active_is("events") && app_is_open("events") && y >= 268 && y < 296 && x >= 226 && x < 582){
+        if(x < 322) request_terminal_command("event list", "event list");
+        else if(x < 442) request_terminal_command("event emit fs.write", "emit fs event");
+        else request_terminal_command("event list", "rusa events");
+    } else if(active_is("storage") && app_is_open("storage") && y >= 268 && y < 296 && x >= 226 && x < 562){
+        if(x < 322) request_terminal_command("block status", "block status");
+        else if(x < 442) request_terminal_command("mounts", "mount table");
+        else request_terminal_command("fd all", "file descriptors");
     } else if(icon_hit(x, y, 32, 70)) gui_open_app("files");
     else if(icon_hit(x, y, 32, 170)) gui_open_app("terminal");
     else if(icon_hit(x, y, 32, 270)) gui_open_app("math");
@@ -1015,6 +1570,9 @@ void gui_handle_click(uint32_t x, uint32_t y){
     else if(icon_hit(x, y, 882, 170)){
         gui_open_app("saver");
     } else if(icon_hit(x, y, 882, 270)) gui_open_app("taskman");
+    else if(icon_hit(x, y, 882, 370)) gui_open_app("projects");
+    else if(icon_hit(x, y, 882, 470)) gui_open_app("packages");
+    else if(icon_hit(x, y, 882, 570)) gui_open_app("logs");
     else if(y >= 720){
         if(x < 112) gui_open_app("terminal");
         else if(task_hit(x, 124)) gui_open_app("files");

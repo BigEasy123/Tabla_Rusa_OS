@@ -5,6 +5,9 @@
 volatile int kb_buffer[128];
 volatile int kb_len = 0;
 static int shift_down = 0;
+static int ctrl_down = 0;
+static int alt_down = 0;
+static int super_down = 0;
 static int caps_on = 0;
 static int extended = 0;
 
@@ -52,20 +55,35 @@ void keyboard_handler(void) {
     }
     if(extended){
         extended = 0;
-        if(sc & 0x80)
+        int release = (sc & 0x80) != 0;
+        uint8_t code = sc & 0x7F;
+        if(code == 0x1D){ ctrl_down = !release; return; }
+        if(code == 0x38){ alt_down = !release; return; }
+        if(code == 0x5B || code == 0x5C){ super_down = !release; return; }
+        if(release)
             return;
         int key = 0;
-        if(sc == 0x48) key = KB_KEY_UP;
-        else if(sc == 0x50) key = KB_KEY_DOWN;
-        else if(sc == 0x4B) key = KB_KEY_LEFT;
-        else if(sc == 0x4D) key = KB_KEY_RIGHT;
-        else if(sc == 0x49) key = KB_KEY_PAGE_UP;
-        else if(sc == 0x51) key = KB_KEY_PAGE_DOWN;
+        if(code == 0x48) key = KB_KEY_UP;
+        else if(code == 0x50) key = KB_KEY_DOWN;
+        else if(code == 0x4B) key = KB_KEY_LEFT;
+        else if(code == 0x4D) key = KB_KEY_RIGHT;
+        else if(code == 0x49) key = KB_KEY_PAGE_UP;
+        else if(code == 0x51) key = KB_KEY_PAGE_DOWN;
+        else if(code == 0x47) key = KB_KEY_HOME;
+        else if(code == 0x4F) key = KB_KEY_END;
+        else if(code == 0x52) key = KB_KEY_INSERT;
+        else if(code == 0x53) key = KB_KEY_DELETE;
+        else if(code == 0x1C) key = '\n';
+        else if(code == 0x35) key = shift_down ? '?' : '/';
         if(key && kb_len < 127)
             kb_buffer[kb_len++] = key;
         return;
     }
 
+    if(sc == 0x1D){ ctrl_down = 1; return; }
+    if(sc == 0x9D){ ctrl_down = 0; return; }
+    if(sc == 0x38){ alt_down = 1; return; }
+    if(sc == 0xB8){ alt_down = 0; return; }
     if(sc == 0x2A || sc == 0x36){
         shift_down = 1;
         return;
@@ -110,6 +128,14 @@ char kb_read_char(void) {
     if(key > 0xFF)
         return 0;
     return (char)key;
+}
+
+int keyboard_ctrl_down(void){
+    return ctrl_down;
+}
+
+int keyboard_alt_down(void){
+    return alt_down || super_down;
 }
 
 void keyboard_install(void) {

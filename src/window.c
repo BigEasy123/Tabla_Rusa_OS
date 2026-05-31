@@ -2,10 +2,10 @@
 #include "console.h"
 
 static struct window_info windows[WINDOW_MAX] = {
-    {"shell", 1, 0, 0, "vga-text"},
-    {"editor", 0, 0, 1, "vga-text"},
-    {"network", 0, 40, 1, "planned"},
-    {"inspector", 0, 40, 12, "planned"}
+    {"shell", 1, 174, 72, 820, 594, "vga-text"},
+    {"editor", 0, 174, 72, 820, 594, "vga-text"},
+    {"network", 0, 174, 72, 820, 594, "planned"},
+    {"inspector", 0, 174, 72, 820, 594, "planned"}
 };
 
 static int win_is(const char* a, const char* b){
@@ -60,6 +60,18 @@ void window_move(const char* name, int x, int y){
     win->y = y;
 }
 
+void window_resize(const char* name, int w, int h){
+    struct window_info* win = window_find(name);
+    if(!win)
+        return;
+    if(w < 360) w = 360;
+    if(h < 260) h = 260;
+    if(w > 900) w = 900;
+    if(h > 640) h = 640;
+    win->w = w;
+    win->h = h;
+}
+
 void window_list(void){
     for(int i=0; i<WINDOW_MAX; i++){
         console_puts(windows[i].focused ? "[focus] " : "[     ] ");
@@ -68,6 +80,10 @@ void window_list(void){
         console_write_dec((uint32_t)windows[i].x);
         console_putc(',');
         console_write_dec((uint32_t)windows[i].y);
+        console_puts(" size=");
+        console_write_dec((uint32_t)windows[i].w);
+        console_putc('x');
+        console_write_dec((uint32_t)windows[i].h);
         console_puts(" surface=");
         console_puts(windows[i].surface);
         console_putc('\n');

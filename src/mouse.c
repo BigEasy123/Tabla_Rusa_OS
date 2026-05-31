@@ -215,6 +215,7 @@ void mouse_move(int dx, int dy){
     mouse.x += dx;
     mouse.y += dy;
     mouse_clamp();
+    gui_handle_drag((uint32_t)mouse.x, (uint32_t)mouse.y, mouse.buttons);
     mouse_sync_fb();
     mouse_event("mouse: move", 1);
 }
@@ -237,6 +238,8 @@ void mouse_button(uint32_t button, int down){
         mouse_focus_at();
         gui_handle_click((uint32_t)mouse.x, (uint32_t)mouse.y);
     }
+    if(button == 0 && !down)
+        gui_handle_drag((uint32_t)mouse.x, (uint32_t)mouse.y, mouse.buttons);
     mouse.last_buttons = mouse.buttons;
     mouse_event(down ? "mouse: button down" : "mouse: button up", 1);
 }
@@ -246,7 +249,8 @@ void mouse_scroll(int amount){
         return;
     mouse.wheel += amount;
     mouse.scrolls++;
-    console_scroll(amount > 0 ? amount * 3 : amount * 3);
+    if(!gui_handle_scroll(amount))
+        console_scroll(amount > 0 ? amount * 3 : amount * 3);
     mouse_event(amount > 0 ? "mouse: scroll up" : "mouse: scroll down", 1);
 }
 
@@ -272,6 +276,7 @@ void mouse_handler(void){
     mouse.x += dx;
     mouse.y += dy;
     mouse_clamp();
+    gui_handle_drag((uint32_t)mouse.x, (uint32_t)mouse.y, mouse.buttons);
     if((mouse.buttons & 1) && !(old_buttons & 1))
         gui_handle_click((uint32_t)mouse.x, (uint32_t)mouse.y);
     if(wheel)
