@@ -13,6 +13,7 @@ int fs_rm(const char* path);
 int fs_cd(const char* path);
 int fs_copy(const char* src, const char* dst);
 int fs_move(const char* src, const char* dst);
+int fs_rename(const char* path, const char* new_name);
 int fs_stat(const char* path, int* type, size_t* size);
 void fs_pwd(char* out, size_t max);
 void fs_ls(const char* path);

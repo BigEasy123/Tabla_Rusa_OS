@@ -629,6 +629,12 @@ int fb_hardware_ready(void){
     return fb.hw_ready;
 }
 
+uint32_t fb_width(void){ return fb.width; }
+uint32_t fb_height(void){ return fb.height; }
+uint32_t fb_bpp(void){ return fb.bpp; }
+uint32_t fb_pitch(void){ return fb.hw_pitch; }
+uint32_t fb_type(void){ return fb.hw_type; }
+
 void fb_cmd(char* arg){
     char* rest;
     const char* action = first_arg(arg, &rest);

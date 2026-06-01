@@ -326,6 +326,16 @@ int fs_move(const char* src, const char* dst){
     return fs_rm(src);
 }
 
+int fs_rename(const char* path, const char* new_name){
+    int id = resolve(path);
+    if(id <= 0 || !new_name || !new_name[0])
+        return -1;
+    if(find_child(nodes[id].parent, new_name) >= 0)
+        return -2;
+    str_copy(nodes[id].name, new_name, FS_NAME_MAX);
+    return 0;
+}
+
 void fs_pwd(char* out, size_t max){
     char tmp[96];
     size_t len = 0;

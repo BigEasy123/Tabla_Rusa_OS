@@ -148,6 +148,8 @@ static int cmd_is(const char* cmd, const char* want){
     return *cmd == 0 && *want == 0;
 }
 
+static const char* first_arg(char* arg, char** rest);
+
 static uint32_t parse_u32(const char* s){
     uint32_t value = 0;
     while(is_space(*s)) s++;
@@ -246,6 +248,8 @@ static void cmd_help(void){
     console_puts("  gfx ARGS    - vector graphics: line/rect/circle/scene\n");
     console_puts("  fb ARGS     - framebuffer: status/mode/surface/mouse/blit\n");
     console_puts("  mouse ARGS  - crosshair pointer: status/set/move/click\n");
+    console_puts("  keyboard A  - keyboard detect/status/locks/layout/repeat/key list\n");
+    console_puts("  hardware A  - CPU/display/memory/input detection and control summary\n");
     console_puts("  job ARGS    - generic OS job scheduler: list/run/priority\n");
     console_puts("  sched ARGS  - cooperative scheduler: list/yield/wake/sleep/quantum\n");
     console_puts("  taskman A   - task manager: top/ps/jobs/services/kill/boost\n");
@@ -306,6 +310,106 @@ static void cmd_regs(void){
     console_putc('\n');
 }
 
+static int cpu_has_cpuid(void){
+    uint32_t before;
+    uint32_t after;
+    __asm__ __volatile__(
+        "pushfl\n"
+        "pushfl\n"
+        "popl %0\n"
+        "movl %0, %1\n"
+        "xorl $0x00200000, %0\n"
+        "pushl %0\n"
+        "popfl\n"
+        "pushfl\n"
+        "popl %0\n"
+        "popfl\n"
+        : "=&r"(after), "=&r"(before)
+        :
+        : "cc");
+    return ((after ^ before) & 0x00200000U) != 0;
+}
+
+static void cpu_cpuid(uint32_t leaf, uint32_t* a, uint32_t* b, uint32_t* c, uint32_t* d){
+    __asm__ __volatile__("cpuid" : "=a"(*a), "=b"(*b), "=c"(*c), "=d"(*d) : "a"(leaf));
+}
+
+static void cmd_hardware(char* arg){
+    char* rest;
+    const char* action = first_arg(arg, &rest);
+    if(action[0] == 0 || cmd_is(action, "status") || cmd_is(action, "all")){
+        console_puts("hardware: cpu keyboard framebuffer memory pointer controls\n");
+        cmd_hardware("cpu");
+        cmd_hardware("keyboard");
+        cmd_hardware("gpu");
+        cmd_hardware("memory");
+        console_puts("control surfaces: keyboard, fb, mouse, compute, privacy, net, sched\n");
+    } else if(cmd_is(action, "cpu")){
+        uint32_t a = 0, b = 0, c = 0, d = 0;
+        char vendor[13];
+        console_puts("cpu arch=i386 cpuid=");
+        console_puts(cpu_has_cpuid() ? "yes" : "no");
+        if(cpu_has_cpuid()){
+            cpu_cpuid(0, &a, &b, &c, &d);
+            ((uint32_t*)vendor)[0] = b;
+            ((uint32_t*)vendor)[1] = d;
+            ((uint32_t*)vendor)[2] = c;
+            vendor[12] = 0;
+            console_puts(" vendor=");
+            console_puts(vendor);
+            cpu_cpuid(1, &a, &b, &c, &d);
+            console_puts(" family=");
+            console_write_dec((a >> 8) & 0xF);
+            console_puts(" model=");
+            console_write_dec((a >> 4) & 0xF);
+            console_puts(" stepping=");
+            console_write_dec(a & 0xF);
+            console_puts(" features=");
+            if(d & (1U << 0)) console_puts("fpu ");
+            if(d & (1U << 4)) console_puts("tsc ");
+            if(d & (1U << 23)) console_puts("mmx ");
+            if(d & (1U << 25)) console_puts("sse ");
+            if(d & (1U << 26)) console_puts("sse2 ");
+            if(c & (1U << 0)) console_puts("sse3 ");
+            if(c & (1U << 9)) console_puts("ssse3 ");
+        }
+        console_putc('\n');
+    } else if(cmd_is(action, "gpu") || cmd_is(action, "display") || cmd_is(action, "framebuffer")){
+        console_puts("display framebuffer=");
+        console_puts(fb_hardware_ready() ? "hardware" : "soft");
+        console_puts(" mode=");
+        console_write_dec(fb_width());
+        console_putc('x');
+        console_write_dec(fb_height());
+        console_putc('x');
+        console_write_dec(fb_bpp());
+        console_puts(" pitch=");
+        console_write_dec(fb_pitch());
+        console_puts(" type=");
+        console_write_dec(fb_type());
+        console_puts(" control=fb mode|cursor|clear|saver gui wallpaper\n");
+    } else if(cmd_is(action, "keyboard") || cmd_is(action, "keys")){
+        keyboard_cmd("status");
+        console_puts("control=keyboard caps|num|scroll|layout|repeat|keys\n");
+    } else if(cmd_is(action, "memory") || cmd_is(action, "mem")){
+        console_puts("memory total_kib=");
+        console_write_dec(memory_total_kib());
+        console_puts(" usable_kib=");
+        console_write_dec(memory_usable_kib());
+        console_puts(" entries=");
+        console_write_dec(memory_map_entries());
+        console_puts(" control=mmap heap paging\n");
+    } else if(cmd_is(action, "control")){
+        console_puts("hardware controls:\n");
+        console_puts("  keyboard caps on|off, keyboard num on|off, keyboard repeat fast\n");
+        console_puts("  fb mode W H BPP, fb cursor dot|cross|target, gui wallpaper MODE\n");
+        console_puts("  mouse set X Y, mouse click, privacy network on|off, net up|down\n");
+        console_puts("  compute vector|bench, sched quantum TASK N, service start|stop NAME\n");
+    } else {
+        console_puts("usage: hardware status|cpu|gpu|keyboard|memory|control\n");
+    }
+}
+
 static inline void outb(uint16_t port, uint8_t val){
     __asm__ __volatile__("outb %0, %1" : : "a"(val), "Nd"(port));
 }
@@ -353,8 +457,6 @@ static void cmd_whoami(void){
 static void cmd_history(void){
     shell_history_cmd();
 }
-
-static const char* first_arg(char* arg, char** rest);
 
 static struct service_info* service_find(const char* name){
     for(size_t i=0; i<SERVICE_MAX; i++)
@@ -1541,6 +1643,8 @@ static void kernel_shell_dispatch(char* line){
     else if(cmd_is(cmd,"gfx") || cmd_is(cmd,"vector")) gfx_cmd(arg);
     else if(cmd_is(cmd,"fb") || cmd_is(cmd,"framebuffer")) fb_cmd(arg);
     else if(cmd_is(cmd,"mouse") || cmd_is(cmd,"pointer")) mouse_cmd(arg);
+    else if(cmd_is(cmd,"keyboard") || cmd_is(cmd,"keys") || cmd_is(cmd,"kb")) keyboard_cmd(arg);
+    else if(cmd_is(cmd,"hardware") || cmd_is(cmd,"hw") || cmd_is(cmd,"devices")) cmd_hardware(arg);
     else if(cmd_is(cmd,"kill")) cmd_kill(arg);
     else if(cmd_is(cmd,"loader") || cmd_is(cmd,"exec")) loader_cmd(arg);
     else if(cmd_is(cmd,"trx")) loader_cmd(arg);

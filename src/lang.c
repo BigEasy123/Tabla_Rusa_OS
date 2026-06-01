@@ -1224,6 +1224,20 @@ int lang_run_file(const char* path, const char* args){
     return lang_run_source(text, path, args);
 }
 
+int lang_last_diag(char* origin, unsigned int origin_max,
+                   unsigned int* line, unsigned int* col,
+                   char* title, unsigned int title_max,
+                   char* detail, unsigned int detail_max){
+    if(!last_diag.active)
+        return 0;
+    copy_text(origin, origin_max, last_diag.origin);
+    if(line) *line = last_diag.line;
+    if(col) *col = last_diag.col;
+    copy_text(title, title_max, last_diag.title);
+    copy_text(detail, detail_max, last_diag.detail);
+    return 1;
+}
+
 static void lang_event_source(const char* source){
     lang_run_source(source, "<event>", "");
 }
