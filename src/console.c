@@ -24,6 +24,9 @@ static uint32_t pointer_y = 24;
 static uint32_t pointer_buttons = 0;
 static int pointer_visible = 0;
 static int fb_terminal = 0;
+static char* capture_buf = 0;
+static size_t capture_max = 0;
+static size_t capture_len = 0;
 
 static inline void outb(uint16_t port, uint8_t val){
     __asm__ __volatile__("outb %0, %1" : : "a"(val), "Nd"(port));
@@ -250,8 +253,31 @@ void console_framebuffer_terminal(int enabled){
         render_fb_terminal();
 }
 
+void console_capture_begin(char* buffer, size_t max){
+    capture_buf = buffer;
+    capture_max = max;
+    capture_len = 0;
+    if(capture_buf && capture_max)
+        capture_buf[0] = 0;
+}
+
+void console_capture_end(void){
+    if(capture_buf && capture_max){
+        if(capture_len >= capture_max)
+            capture_len = capture_max - 1;
+        capture_buf[capture_len] = 0;
+    }
+    capture_buf = 0;
+    capture_max = 0;
+    capture_len = 0;
+}
+
 void console_putc(char c){
     serial_putc(c);
+    if(capture_buf && capture_max && capture_len + 1 < capture_max){
+        capture_buf[capture_len++] = c;
+        capture_buf[capture_len] = 0;
+    }
     if(c == '\r'){
         cx = 0;
         return;

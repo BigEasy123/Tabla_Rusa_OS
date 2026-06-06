@@ -2,7 +2,7 @@
 
 This file is the living feature ledger for Tabla Rusa OS. Update it after each development prompt.
 
-Last updated: after adding multi-window desktop surfaces, per-app window geometry, click-to-focus inactive windows, and Settings tabs for privacy, hardware/GPU, keyboard, and display controls.
+Last updated: after verifying the new GitHub remote and adding real command-output capture to the GUI Terminal.
 
 ## Current Kernel Shape
 
@@ -151,6 +151,7 @@ The scanner reports the file, line, column, readable issue title, and plain-Engl
 - Full-stack boot prints the ASCII intro, initializes core drivers, brings `net up`, starts the GUI desktop, and hides the terminal prompt.
 - Opening Terminal from inside an app still enables the framebuffer-backed full terminal for command output, Rusa commands, and editor prompts.
 - The Terminal desktop app now accepts typed commands directly in the GUI window, runs them through the shell dispatcher, and keeps a small GUI-side scrollback.
+- The GUI Terminal now captures real shell/console output from commands such as `pwd`, `help`, `lang`, `math`, `net`, and `tree` into its own window scrollback instead of only reporting that a command ran.
 - Closing the last GUI window now returns to the wallpaper desktop instead of leaving an unclosable Terminal panel.
 - Keyboard handling covers Caps Lock, Num Lock, Scroll Lock, keypad navigation/numeric behavior, F1-F12, arrows, Home/End, Insert/Delete, PageUp/PageDown, left/right Ctrl, left/right Alt, and Super keys.
 - `keyboard status` and `keyboard detect` expose the detected PS/2 translated set-1 keyboard model, layout, modifier/lock state, last scancode, and event count.
@@ -233,6 +234,7 @@ gui settings privacy  opens Settings privacy controls
 gui settings hardware opens CPU/GPU/memory overview
 gui settings keyboard opens keyboard type/lock controls
 gui settings display  opens framebuffer/cursor controls
+gui windows           lists legacy windows plus GUI app stack bottom-to-top
 gui cursor dot     high-contrast crosshair with black center dot
 gui cursor cross   plain white crosshair
 gui cursor target  alias for the dot/target style
@@ -270,7 +272,7 @@ gui math physics   shows first-principles field/force tools
 gui math latex     shows publishing-oriented LaTeX conversion
 gui math jobs      shows scientific job accounting
 gui close APP      closes a GUI app window; aliases like net/pkg/log work
-gui close terminal returns from the Terminal window to the desktop
+gui close terminal reveals the next topmost window, or the desktop if no app remains
 gui files up       moves the Files app to the parent folder
 gui files new NAME creates a file in the current Files folder
 gui files mkdir NAME creates a folder in the current Files folder
@@ -432,6 +434,8 @@ taskman boost
 - The default GUI pointer is now a white crosshair with a black center dot for better visibility.
 - Cursor style can be changed from settings with `gui cursor dot`, `gui cursor cross`, or `gui cursor target`; the framebuffer command `fb cursor ...` exposes the same setting.
 - Terminal app launch now stays inside the desktop and provides direct GUI typing, Enter-to-run, and PageUp/PageDown or wheel scrollback.
+- Terminal command execution is wrapped in a console capture buffer, so output printed through `console_putc`, `console_puts`, `console_write_dec`, or `console_write_hex` is copied into the GUI Terminal window.
+- The GUI Terminal stores a 24-line window scrollback and keeps the latest captured output available as the terminal app's active command/result summary.
 - In-app Open Terminal buttons still switch on the framebuffer terminal renderer for the full command-line mode when needed.
 - Non-terminal desktop icons now open GUI app windows instead of immediately dropping into Terminal.
 - Each GUI app window has an Open Terminal button for the matching command-line tool.
@@ -442,8 +446,15 @@ taskman boost
 - App windows can be minimized, restored, maximized, and unmaximized from titlebar controls or with `gui minimize`, `gui restore`, and `gui maximize`.
 - Minimized apps stay open, show a small taskbar marker, and restore when clicked from the taskbar or launched again.
 - Open apps now keep per-app geometry instead of sharing one global window rectangle.
-- Multiple apps can remain visibly open on the desktop: inactive windows draw as smaller live surfaces behind the focused app.
+- Multiple apps can remain visibly open on the desktop using a real GUI z-order stack.
+- GUI app windows draw bottom-to-top, and focusing an app brings it to the front.
+- Closing or minimizing the active app now reveals the next topmost visible app instead of falling back to a hardcoded order.
+- Inactive windows now draw at their saved full frame size, with titlebars and window controls visible.
 - Clicking an inactive window focuses it and restores its saved geometry.
+- `gui windows` reports the GUI app stack from bottom to top, including open/minimized state and geometry.
+- Active app content now renders through a local window coordinate transform, so shared buttons, tabs, Editor, Rusa Workbench, Math Lab, Terminal, Files, Settings, Saver, and subsystem panels follow the active window when it moves.
+- Active app click routing now uses the same local coordinate transform, so tabs, buttons, file rows, editor text placement, and terminal input keep working after moving the window.
+- Editor and Terminal mouse-wheel hitboxes are also local to the moved window.
 - `gui focus APP` now focuses GUI apps directly instead of only the older low-level window records.
 - A dedicated hybrid Editor desktop app can switch between paper drafting mode and code workspace mode.
 - Editor Paper mode opens `/home/notes.txt`; Editor Code mode opens `/home/projects/demo.rusa`.
@@ -761,13 +772,16 @@ GUI files delete
 GUI files new folder
 GUI files up
 GUI files open terminal
-GUI terminal inline command
+GUI terminal inline command with captured output
 GUI window geometry commands
 GUI window minimize
 GUI window restore/maximize
 GUI settings hardware tab
 GUI settings keyboard tab
 GUI multiwindow focus app
+GUI closes terminal reveals stack
+GUI z-order fallback
+GUI local moved-window click
 vector/network descriptors
 network packet queue
 block device descriptor
@@ -840,6 +854,7 @@ gui maximize active
 gui minimize active
 gui restore editor
 gui focus math
+gui windows
 gui settings hardware
 gui settings keyboard
 gui settings display
@@ -848,11 +863,12 @@ GUI desktop key 5 + Enter -> tree /home
 GUI icon click -> launch request for tree /home
 GUI icon click -> app window, Open Terminal button -> command launch request
 GUI Terminal: type pwd then Enter -> command runs in-window
+GUI Terminal: type pwd then Enter -> captured output shows /home
 Enter -> framebuffer terminal -> pwd/lang examples/edit works
 ```
 
 Latest QEMU selftest result:
 
 ```text
-selftest pass=86 fail=0
+selftest pass=88 fail=0
 ```
