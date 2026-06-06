@@ -39,7 +39,10 @@ static uint32_t editor_top = 0;
 static uint32_t editor_sel_start = 0;
 static uint32_t editor_sel_end = 0;
 static int editor_selection = 0;
+static int editor_dialog_mode = 0; /* 0=none, 1=open, 2=save-as */
 static char editor_current_path[96] = "/home/notes.txt";
+static char editor_dialog_dir[96] = "/home";
+static char editor_dialog_selected[96] = "/home/readme.txt";
 static char file_dir[96] = "/home";
 static char file_selected[96] = "/home/readme.txt";
 static uint32_t file_last_click_index = 9999;
@@ -155,6 +158,7 @@ static void gui_focus_app(const char* app);
 static void request_terminal_command(const char* command, const char* notice);
 static void draw_active_app_detail(void);
 static void gui_window_list(void);
+static void file_parent_path(const char* path, char* out, uint32_t max);
 
 static char lower_char(char c){
     if(c >= 'A' && c <= 'Z') return (char)(c - 'A' + 'a');
@@ -978,6 +982,72 @@ static void editor_open_path(const char* path){
     editor_load_file();
 }
 
+static void editor_dialog_select_first(void){
+    char name[40];
+    int type = 0;
+    if(fs_child_name(editor_dialog_dir, 0, name, sizeof(name), &type) == 0)
+        fs_join_path(editor_dialog_dir, name, editor_dialog_selected, sizeof(editor_dialog_selected));
+    else
+        copy_text(editor_dialog_selected, editor_dialog_dir, sizeof(editor_dialog_selected));
+}
+
+static void editor_dialog_open(int mode){
+    editor_dialog_mode = mode;
+    file_parent_path(editor_current_path, editor_dialog_dir, sizeof(editor_dialog_dir));
+    editor_dialog_select_first();
+    copy_text(launch_notice, mode == 2 ? "save as dialog" : "open dialog", sizeof(launch_notice));
+}
+
+static void editor_dialog_select_index(uint32_t index){
+    char name[40];
+    int type = 0;
+    if(fs_child_name(editor_dialog_dir, (int)index, name, sizeof(name), &type) == 0)
+        fs_join_path(editor_dialog_dir, name, editor_dialog_selected, sizeof(editor_dialog_selected));
+}
+
+static void editor_dialog_up(void){
+    file_parent_path(editor_dialog_dir, editor_dialog_dir, sizeof(editor_dialog_dir));
+    editor_dialog_select_first();
+    copy_text(launch_notice, "dialog folder up", sizeof(launch_notice));
+}
+
+static void editor_dialog_confirm(void){
+    int type = 0;
+    size_t size = 0;
+    if(editor_dialog_mode == 0)
+        return;
+    if(fs_stat(editor_dialog_selected, &type, &size) == 0 && type == 1){
+        copy_text(editor_dialog_dir, editor_dialog_selected, sizeof(editor_dialog_dir));
+        editor_dialog_select_first();
+        copy_text(launch_notice, "dialog folder opened", sizeof(launch_notice));
+        return;
+    }
+    if(editor_dialog_mode == 1){
+        editor_open_path(editor_dialog_selected);
+        copy_text(launch_notice, "dialog file opened", sizeof(launch_notice));
+    } else {
+        copy_text(editor_current_path, editor_dialog_selected, sizeof(editor_current_path));
+        if(text_has(editor_current_path, ".rusa"))
+            editor_mode = 1;
+        editor_save_file();
+        copy_text(launch_notice, "dialog file saved", sizeof(launch_notice));
+    }
+    gui_save_settings();
+    editor_dialog_mode = 0;
+}
+
+static void editor_dialog_save_quick(int rusa_file){
+    copy_text(editor_dialog_selected, rusa_file ? "/home/projects/untitled.rusa" : "/home/untitled.txt",
+              sizeof(editor_dialog_selected));
+    editor_dialog_mode = 2;
+    editor_dialog_confirm();
+}
+
+static void editor_dialog_cancel(void){
+    editor_dialog_mode = 0;
+    copy_text(launch_notice, "dialog canceled", sizeof(launch_notice));
+}
+
 static void files_select_index(uint32_t index){
     char name[40];
     int type = 0;
@@ -1351,6 +1421,40 @@ static void draw_editor_surface(void){
                                       "Paper: arrows/wheel/Page edit, Save writes notes.txt", 0x2E6B4C);
 }
 
+static void draw_editor_file_dialog(void){
+    char name[40];
+    char row[84];
+    int type = 0;
+    if(!editor_dialog_mode)
+        return;
+    app_fill_rect(286, 218, 560, 330, 0x1C2630);
+    app_fill_rect(292, 224, 548, 318, 0xF6F8FA);
+    app_fill_rect(292, 224, 548, 36, editor_dialog_mode == 2 ? 0x4F7088 : 0x345A7A);
+    app_draw_text(312, 246, editor_dialog_mode == 2 ? "Save As" : "Open File", 0xFFFFFF);
+    app_draw_text(312, 286, "Folder", 0x345A7A);
+    app_draw_text(402, 286, editor_dialog_dir, 0x223040);
+    app_draw_text(312, 314, "Selected", 0x345A7A);
+    app_draw_text(402, 314, editor_dialog_selected, 0x223040);
+    draw_button(312, 336, 64, "Up", 0x345A7A);
+    draw_button(390, 336, 96, editor_dialog_mode == 2 ? "Save" : "Open", 0x3C704C);
+    draw_button(500, 336, 96, "Cancel", 0xA84A4A);
+    if(editor_dialog_mode == 2){
+        draw_button(610, 336, 88, ".txt", 0x4F7088);
+        draw_button(710, 336, 88, ".rusa", 0x725C9A);
+    }
+    app_fill_rect(312, 380, 500, 132, 0xFFFFFF);
+    for(uint32_t i=0; i<5; i++){
+        if(fs_child_name(editor_dialog_dir, (int)i, name, sizeof(name), &type) != 0)
+            break;
+        fs_join_path(editor_dialog_dir, name, row, sizeof(row));
+        if(str_eq(row, editor_dialog_selected))
+            app_fill_rect(320, 390 + i * 24, 480, 18, 0xDDEBFF);
+        copy_text(row, type == 1 ? "[dir]  " : "[file] ", sizeof(row));
+        append_text(row, name, sizeof(row));
+        app_draw_text(330, 404 + i * 24, row, 0x223040);
+    }
+}
+
 static void draw_rusa_surface(void){
     app_fill_rect(226, 328, 700, 230, 0xFFFFFF);
     app_fill_rect(226, 328, 160, 230, 0x2C243C);
@@ -1719,6 +1823,7 @@ static void draw_active_app_detail(void){
         draw_button(562, 310, 72, "Find", 0x887034);
         draw_button(646, 310, 82, "Save As", 0x4F7088);
         draw_editor_surface();
+        draw_editor_file_dialog();
     } else if(active_is("inspector")){
         draw_app_line(1, "System", "memory scheduler trace replay logs");
         draw_app_line(2, "Terminal", "Enter opens: inspect memory");
@@ -1970,8 +2075,12 @@ void gui_cmd(char* arg){
             copy_text(launch_notice, "editor code mode", sizeof(launch_notice));
         } else if(str_eq(mode, "open")){
             const char* path = first_arg(rest, &rest);
-            editor_open_path(path[0] ? path : editor_current_path);
-            copy_text(launch_notice, "editor file opened", sizeof(launch_notice));
+            if(path[0]){
+                editor_open_path(path);
+                copy_text(launch_notice, "editor file opened", sizeof(launch_notice));
+            } else {
+                editor_dialog_open(1);
+            }
         } else if(str_eq(mode, "save")){
             const char* path = first_arg(rest, &rest);
             if(path[0])
@@ -1981,16 +2090,33 @@ void gui_cmd(char* arg){
             copy_text(launch_notice, "editor file saved", sizeof(launch_notice));
         } else if(str_eq(mode, "saveas")){
             const char* path = first_arg(rest, &rest);
-            if(path[0])
+            if(path[0]){
                 copy_text(editor_current_path, path, sizeof(editor_current_path));
-            editor_save_file();
-            gui_save_settings();
-            copy_text(launch_notice, "editor saved as", sizeof(launch_notice));
+                editor_save_file();
+                gui_save_settings();
+                copy_text(launch_notice, "editor saved as", sizeof(launch_notice));
+            } else {
+                editor_dialog_open(2);
+            }
         } else if(str_eq(mode, "openas")){
             const char* path = first_arg(rest, &rest);
             editor_open_path(path[0] ? path : editor_current_path);
             gui_save_settings();
             copy_text(launch_notice, "editor open dialog path", sizeof(launch_notice));
+        } else if(str_eq(mode, "dialog")){
+            const char* sub = first_arg(rest, &rest);
+            if(str_eq(sub, "open")) editor_dialog_open(1);
+            else if(str_eq(sub, "save") || str_eq(sub, "saveas")) editor_dialog_open(2);
+            else if(str_eq(sub, "up")) editor_dialog_up();
+            else if(str_eq(sub, "select")) editor_dialog_select_index(parse_u32(rest));
+            else if(str_eq(sub, "confirm")) editor_dialog_confirm();
+            else if(str_eq(sub, "txt")) editor_dialog_save_quick(0);
+            else if(str_eq(sub, "rusa")) editor_dialog_save_quick(1);
+            else if(str_eq(sub, "cancel")) editor_dialog_cancel();
+            else {
+                console_puts("usage: gui editor dialog open|save|up|select N|confirm|txt|rusa|cancel\n");
+                return;
+            }
         } else if(str_eq(mode, "new")){
             const char* path = first_arg(rest, &rest);
             if(path[0])
@@ -2019,7 +2145,7 @@ void gui_cmd(char* arg){
             const char* needle = first_arg(rest, &rest);
             copy_text(launch_notice, editor_find(needle) >= 0 ? "find matched" : "find missed", sizeof(launch_notice));
         } else if(mode[0]){
-            console_puts("usage: gui editor paper|code|new [PATH]|open [PATH]|openas PATH|save [PATH]|saveas PATH|select A B|copy|cut|paste|find TEXT\n");
+            console_puts("usage: gui editor paper|code|new [PATH]|open [PATH]|openas PATH|save [PATH]|saveas PATH|dialog ACTION|select A B|copy|cut|paste|find TEXT\n");
             return;
         }
         gui_save_settings();
@@ -2588,6 +2714,19 @@ void gui_handle_click(uint32_t x, uint32_t y){
     } else if(!(app_is_visible(active_app) && x >= gui_win_x && x < gui_win_x + gui_win_w &&
                 y >= gui_win_y && y < gui_win_y + gui_win_h) && inactive_window_action_at(x, y)){
         /* Focus handled above. */
+    } else if(active_is("editor") && app_is_open("editor") && editor_dialog_mode &&
+              sx >= 286 && sx < 846 && sy >= 218 && sy < 548){
+        editor_focused = 0;
+        if(sy >= 336 && sy < 364 && sx >= 312 && sx < 798){
+            if(sx < 376) editor_dialog_up();
+            else if(sx < 486) editor_dialog_confirm();
+            else if(sx < 596) editor_dialog_cancel();
+            else if(editor_dialog_mode == 2 && sx < 698) editor_dialog_save_quick(0);
+            else if(editor_dialog_mode == 2) editor_dialog_save_quick(1);
+        } else if(sy >= 390 && sy < 510 && sx >= 312 && sx < 812){
+            editor_dialog_select_index((sy - 390) / 24);
+            copy_text(launch_notice, "dialog item selected", sizeof(launch_notice));
+        }
     } else if(active_is("rusa") && app_is_open("rusa") && sy >= 268 && sy < 298 && sx >= 226 && sx < 788){
         if(sx < 312) rusa_tab = 0;
         else if(sx < 412) rusa_tab = 1;
@@ -2696,8 +2835,7 @@ void gui_handle_click(uint32_t x, uint32_t y){
             copy_text(launch_notice, "new document ready", sizeof(launch_notice));
         }
         else if(sx < 442){
-            editor_load_file();
-            copy_text(launch_notice, "document opened", sizeof(launch_notice));
+            editor_dialog_open(1);
         }
         else if(sx < 562){
             editor_save_file();
@@ -2705,8 +2843,7 @@ void gui_handle_click(uint32_t x, uint32_t y){
             copy_text(launch_notice, "document saved", sizeof(launch_notice));
         }
         else {
-            copy_text(launch_notice, "opening editor", sizeof(launch_notice));
-            terminal_requested = 1;
+            editor_dialog_open(1);
         }
     } else if(active_is("editor") && app_is_open("editor") && sy >= 310 && sy < 338 && sx >= 226 && sx < 728){
         editor_focused = 1;
@@ -2726,9 +2863,7 @@ void gui_handle_click(uint32_t x, uint32_t y){
         } else if(sx < 634){
             copy_text(launch_notice, editor_find(editor_mode ? "print" : "Title") >= 0 ? "find matched" : "find missed", sizeof(launch_notice));
         } else {
-            editor_save_file();
-            gui_save_settings();
-            copy_text(launch_notice, "saved as current path", sizeof(launch_notice));
+            editor_dialog_open(2);
         }
     } else if(active_is("projects") && app_is_open("projects") && sy >= 268 && sy < 296 && sx >= 226 && sx < 582){
         if(sx < 322) request_terminal_command("project list", "project list");

@@ -2,7 +2,7 @@
 
 This file is the living feature ledger for Tabla Rusa OS. Update it after each development prompt.
 
-Last updated: after verifying the new GitHub remote and adding real command-output capture to the GUI Terminal.
+Last updated: after adding a GUI-native Editor Open/Save As file dialog with selectable filesystem rows and quick .txt/.rusa save targets.
 
 ## Current Kernel Shape
 
@@ -254,6 +254,14 @@ gui editor open [PATH] loads a file into the GUI editor
 gui editor openas PATH opens an explicit path through the Open As flow
 gui editor save [PATH] saves the GUI editor buffer to a file
 gui editor saveas PATH saves the GUI editor buffer to a new path
+gui editor dialog open opens the in-window file picker
+gui editor dialog save opens the in-window Save As picker
+gui editor dialog up moves the dialog to the parent folder
+gui editor dialog select N selects a visible dialog row
+gui editor dialog confirm opens or saves the selected dialog target
+gui editor dialog txt quick-saves to /home/untitled.txt
+gui editor dialog rusa quick-saves to /home/projects/untitled.rusa
+gui editor dialog cancel closes the file dialog
 gui editor select A B selects lines A through B
 gui editor copy    copies the selected line range
 gui editor cut     cuts the selected line range
@@ -460,6 +468,8 @@ taskman boost
 - Editor Paper mode opens `/home/notes.txt`; Editor Code mode opens `/home/projects/demo.rusa`.
 - The Editor app includes GUI controls for Paper, Code, New, Open, Save, Open File, Select, Copy, Cut, Paste, Find, and Save As.
 - The Editor app can now open, create, and save explicit paths such as `gui editor open /home/readme.txt` or `gui editor save /home/projects/scratch.rusa`.
+- The Editor app now has an in-window Open/Save As dialog with folder navigation, row selection, Open/Save/Cancel controls, and quick `.txt` or `.rusa` Save As targets.
+- Editor dialog commands support `gui editor dialog open`, `save`, `up`, `select N`, `confirm`, `txt`, `rusa`, and `cancel`.
 - The Editor app supports multi-line selection using `gui editor select A B`, plus range copy/cut/paste.
 - Find highlights the matching line and scrolls the editor to it.
 - Clicking inside the Editor document/code pane focuses a GUI-side text buffer.
@@ -765,6 +775,8 @@ GUI editor scroll/write
 GUI editor path open/save
 GUI editor range tools
 GUI editor open/save dialogs
+GUI editor file dialog open
+GUI editor file dialog save
 GUI file browser edit bridge
 GUI files new file
 GUI files rename
@@ -835,6 +847,12 @@ gui editor paste
 gui editor find Welcome
 gui editor saveas /home/projects/saveas.rusa
 gui editor openas /home/projects/saveas.rusa
+gui editor dialog open
+gui editor dialog up
+gui editor dialog select 4
+gui editor dialog confirm
+gui editor dialog save
+gui editor dialog rusa
 gui rusa docs
 gui wallpaper lava
 gui wallpaper live rain
@@ -870,5 +888,5 @@ Enter -> framebuffer terminal -> pwd/lang examples/edit works
 Latest QEMU selftest result:
 
 ```text
-selftest pass=88 fail=0
+selftest pass=90 fail=0
 ```
