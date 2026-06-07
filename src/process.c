@@ -40,6 +40,16 @@ struct process_info* process_find(const char* name){
     return 0;
 }
 
+const struct process_info* process_at(uint32_t index){
+    if(index >= PROCESS_MAX)
+        return 0;
+    return &processes[index];
+}
+
+uint32_t process_count(void){
+    return PROCESS_MAX;
+}
+
 void process_set_running(const char* name, int running){
     struct process_info* proc = process_find(name);
     if(proc)

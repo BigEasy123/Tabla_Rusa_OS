@@ -20,6 +20,8 @@ struct process_info {
 
 void process_init(void);
 struct process_info* process_find(const char* name);
+const struct process_info* process_at(uint32_t index);
+uint32_t process_count(void);
 void process_set_running(const char* name, int running);
 void process_set_compute(const char* name, const char* workload, uint32_t priority, uint32_t cpu_hint);
 void process_tick(const char* name, uint32_t ticks);

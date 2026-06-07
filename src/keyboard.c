@@ -225,7 +225,12 @@ void keyboard_handler(void) {
         uint8_t code = sc & 0x7F;
         if(code == 0x1D){ ctrl_down = !release; return; }
         if(code == 0x38){ alt_down = !release; return; }
-        if(code == 0x5B || code == 0x5C){ super_down = !release; return; }
+        if(code == 0x5B || code == 0x5C){
+            super_down = !release;
+            if(!release && kb_len < 127)
+                kb_buffer[kb_len++] = code == 0x5B ? KB_KEY_SUPER_LEFT : KB_KEY_SUPER_RIGHT;
+            return;
+        }
         if(release)
             return;
         int key = 0;

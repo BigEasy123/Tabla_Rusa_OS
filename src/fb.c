@@ -215,6 +215,10 @@ void fb_clear(uint32_t color){
     cursor_back_count = 0;
 }
 
+void fb_begin_paint(void){
+    cursor_restore();
+}
+
 void fb_put_pixel(uint32_t x, uint32_t y, uint32_t color){
     uint32_t rx;
     uint32_t ry;

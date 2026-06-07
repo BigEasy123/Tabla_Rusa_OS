@@ -2,15 +2,19 @@
 
 This file is the living feature ledger for Tabla Rusa OS. Update it after each development prompt.
 
-Last updated: after adding a GUI-native Editor Open/Save As file dialog with selectable filesystem rows and quick .txt/.rusa save targets.
+Last updated: after adding Phase 15 developer documentation.
 
 ## Current Kernel Shape
 
 - i386 multiboot2 kernel with VGA text console, terminal scrollback, serial logging, IDT/PIC/timer/keyboard, heap, paging, memory map reporting, and RAM filesystem.
 - Native shell/language surface is launched from `kmain.c`, while shell session state, editor state, dispatch bridge, and most OS behaviors live behind subsystem modules.
 - Boot includes ASCII intro, a full-stack autostart path, and `/home`, `/system`, `/proc`, `/pkg`, `/dev`, `/var/log`, `/share/docs`, and `/home/math`.
+- Boot writes `/system/kernel/modules.txt` and `/system/kernel/boundaries.txt` from `kernel_modules.c`, making subsystem ownership and future cleanup targets inspectable.
+- Kernel cleanup now has an explicit boundary descriptor for shell, editor, GUI, Rusa, FS, process, net, security, and math ownership.
+- Repository docs now include `docs/ARCHITECTURE.md`, `docs/RUSA.md`, `docs/GUI_APPS.md`, `docs/KERNEL_SUBSYSTEMS.md`, and `docs/TESTING.md`.
 - The boot path now starts networking, GUI compositor state, scheduler state, and the crosshair pointer by default.
 - GUI boot writes `/system/gui/state.txt` so autostart state is inspectable after startup.
+- GUI boot writes `/system/boot/startup.txt`, and `gui boot safe|recovery|logs` provides safe graphics mode, recovery terminal bridge, and startup log access.
 - `make run` launches the graphical QEMU SDL display so keyboard and pointer focus are more predictable; `make run-gtk` is a graphical fallback; `make run-text` keeps the old curses backend for text-only testing.
 - Boot now requests a 1024x768x32 linear framebuffer from GRUB and lands directly in GUI desktop mode.
 - GUI boot now starts at the icon desktop with no forced app window, so the wallpaper is visible immediately.
@@ -152,6 +156,9 @@ The scanner reports the file, line, column, readable issue title, and plain-Engl
 - Opening Terminal from inside an app still enables the framebuffer-backed full terminal for command output, Rusa commands, and editor prompts.
 - The Terminal desktop app now accepts typed commands directly in the GUI window, runs them through the shell dispatcher, and keeps a small GUI-side scrollback.
 - The GUI Terminal now captures real shell/console output from commands such as `pwd`, `help`, `lang`, `math`, `net`, and `tree` into its own window scrollback instead of only reporting that a command ran.
+- The GUI Terminal now has cursor-aware input editing with Left/Right/Home/End/Delete/Backspace and insertion at the cursor.
+- The GUI Terminal keeps a local command-history ring; Up recalls previous commands and Down moves forward/clears.
+- The GUI Terminal prompt draws a visible cursor aligned to the current input column.
 - Closing the last GUI window now returns to the wallpaper desktop instead of leaving an unclosable Terminal panel.
 - Keyboard handling covers Caps Lock, Num Lock, Scroll Lock, keypad navigation/numeric behavior, F1-F12, arrows, Home/End, Insert/Delete, PageUp/PageDown, left/right Ctrl, left/right Alt, and Super keys.
 - `keyboard status` and `keyboard detect` expose the detected PS/2 translated set-1 keyboard model, layout, modifier/lock state, last scancode, and event count.
@@ -249,6 +256,7 @@ gui wallpaper off   returns to the plain desktop wallpaper
 gui backdrop MODE   alias for gui wallpaper MODE
 gui editor paper   switches the Editor app into paper drafting mode
 gui editor code    switches the Editor app into code workspace mode
+gui editor math    switches the Editor app into math notes mode
 gui editor new [PATH] creates a fresh GUI-side document buffer
 gui editor open [PATH] loads a file into the GUI editor
 gui editor openas PATH opens an explicit path through the Open As flow
@@ -273,6 +281,7 @@ gui rusa docs      switches Rusa Workbench to language docs
 gui rusa check     switches Rusa Workbench to source checking
 gui rusa run       switches Rusa Workbench to source running
 gui rusa diagnostics switches Rusa Workbench to friendly errors
+gui rusa packages  shows package/import visualization
 gui math vector    shows vector dot-product and workload notes
 gui math matrix    shows a determinant/object-storage panel
 gui math group     shows modular units/group-theory examples
@@ -285,6 +294,8 @@ gui files up       moves the Files app to the parent folder
 gui files new NAME creates a file in the current Files folder
 gui files mkdir NAME creates a folder in the current Files folder
 gui files rename NAME renames the selected Files item
+gui files copy NAME copies the selected Files item
+gui files move NAME moves the selected Files item
 gui files delete   deletes the selected Files item
 gui files select N selects a visible Files row
 gui files open editor opens the selected file in Editor
@@ -459,6 +470,11 @@ taskman boost
 - Closing or minimizing the active app now reveals the next topmost visible app instead of falling back to a hardcoded order.
 - Inactive windows now draw at their saved full frame size, with titlebars and window controls visible.
 - Clicking an inactive window focuses it and restores its saved geometry.
+- Clicking visible app content in an inactive window now focuses it and routes that same click through the app's normal local hit testing.
+- Clicking visible inactive titlebar chrome brings the window to the front and can immediately start drag or resize behavior.
+- Inactive window chrome handles close, minimize, and maximize without requiring a second click.
+- Inactive windows now render real app surfaces through a saved/restored GUI render context instead of placeholder summary panels.
+- `gui status` reports inactive live-surface render counts to help catch compositor regressions.
 - `gui windows` reports the GUI app stack from bottom to top, including open/minimized state and geometry.
 - Active app content now renders through a local window coordinate transform, so shared buttons, tabs, Editor, Rusa Workbench, Math Lab, Terminal, Files, Settings, Saver, and subsystem panels follow the active window when it moves.
 - Active app click routing now uses the same local coordinate transform, so tabs, buttons, file rows, editor text placement, and terminal input keep working after moving the window.
@@ -466,6 +482,7 @@ taskman boost
 - `gui focus APP` now focuses GUI apps directly instead of only the older low-level window records.
 - A dedicated hybrid Editor desktop app can switch between paper drafting mode and code workspace mode.
 - Editor Paper mode opens `/home/notes.txt`; Editor Code mode opens `/home/projects/demo.rusa`.
+- Editor Math mode opens `/home/math/notes.md` with markdown-style math notes, formulas, physics reminders, and LaTeX command hints.
 - The Editor app includes GUI controls for Paper, Code, New, Open, Save, Open File, Select, Copy, Cut, Paste, Find, and Save As.
 - The Editor app can now open, create, and save explicit paths such as `gui editor open /home/readme.txt` or `gui editor save /home/projects/scratch.rusa`.
 - The Editor app now has an in-window Open/Save As dialog with folder navigation, row selection, Open/Save/Cancel controls, and quick `.txt` or `.rusa` Save As targets.
@@ -478,34 +495,57 @@ taskman boost
 - Mouse wheel/touchpad scroll gestures over the document pane scroll the GUI Editor instead of the terminal history.
 - The GUI Editor has simple line copy/paste commands as the first text-selection/editing bridge.
 - Save writes the GUI-side buffer back through the RAM filesystem.
-- The Files app now lists the current folder, tracks a selected item, supports Up navigation, creates files/folders, renames, deletes, double-click opens, and has Open With buttons for Editor, Terminal, and Rusa Workbench.
-- Rusa Workbench is a standalone GUI app for `.rusa` language work, with tabs for examples, keywords, docs, check, run, and diagnostics.
+- The Files app now lists the current folder, tracks a selected item, supports Up navigation, creates files/folders, renames, copies, moves, deletes, double-click opens, and has Open With buttons for Editor, Terminal, and Rusa Workbench.
+- The Files app displays selected-item metadata including type, size, simple root owner, and `rw` permission surface.
+- Rusa Workbench is a standalone GUI app for `.rusa` language work, with tabs for examples/source, keywords, docs, check, run, diagnostics, and packages.
 - Rusa Workbench runs Check/Run from the GUI, displays status lines inside the window, and summarizes friendly diagnostics with file, line, column, title, and plain-English detail.
+- Rusa Workbench Packages shows a first package/import visualization for std/docs/math/physics/gui/net and points current source imports at `/lib/rusa/std.rusa`.
 - Math Lab now has GUI tabs for Vector, Matrix, Group, Physics, LaTeX, and Jobs instead of a placeholder catalog panel.
 - Math Lab tabs run the matching math command path to update process/job accounting and show useful in-window examples/results.
+- Math Lab now captures actual math command output into its result panel and draws compact vector, matrix, field, LaTeX, and job/proof previews.
+- `math logic implies|modus|and|or` adds a small proof-assistant starter surface with process/job accounting.
+- Task Manager now renders live process rows with state, priority, ticks, workload-to-window mapping, selected process details, and job queue rows.
+- Task Manager GUI actions can select, focus, kill, restart, and boost compute workloads through `gui taskman ...` and in-window buttons.
 - The app window frame now has a softer desktop skin with a titlebar, shadow, window-control dots, lighter buttons, and cleaner selected tabs.
 - Projects, Packages, Logs, Security, Events, and Storage now have GUI app windows with Open Terminal bridges to their subsystem commands.
-- Settings now has tabs for Privacy, Hardware, Keyboard, and Display.
+- Security Center now shows secure/permissive mode, current user, privacy/cookie policy, network shield, IP masking, packet count, and listening port in plain language.
+- Security Center GUI buttons and `gui security ...` can lock/unlock, show ports, run malicious-code scans, open audit logs, and open the privacy status.
+- Network app now shows live socket rows with protocol, state, local port, TX/RX counts, shield, IP masking, and flood threshold.
+- `gui network open|send|flush|shield` controls the socket-like loopback network surface from the desktop.
+- Settings now has tabs for Privacy, Hardware, Keyboard, Display, and Input.
 - Settings Hardware shows CPU/GPU/memory summary and bridges to `hardware cpu`, `hardware gpu`, and `hardware memory`.
 - Settings Keyboard shows detected keyboard type and lock state, with GUI buttons for Caps, Num, and key listing.
 - Settings Display shows framebuffer mode and cursor style, with GUI buttons for dot, cross, and target cursors.
+- Settings Input shows mouse speed preference, pointer style, keyboard type, and bridges to `mouse status`.
 - Settings Privacy still includes quick GUI jumps into Security, Events, and Storage.
 - Project/package/log/security/event/storage action buttons can launch their matching shell commands directly.
 - `gui close` now canonicalizes aliases, so `gui close net`, `gui close pkg`, and similar names close the visible app instead of leaving stale focus.
 - Screensaver-inspired wallpapers now render as coherent colored desktop backgrounds instead of scaled grayscale debug rasters.
 - `gui wallpaper lava|rain|stars|waves|off` selects a still wallpaper by default; `gui wallpaper live MODE` or `gui wallpaper MODE live` turns on slow opt-in animation.
 - `gui backdrop lava|rain|stars|waves|off` remains as a compatibility alias for wallpaper selection.
+- Screensaver preview mode is now tracked separately from wallpaper mode, so testing a saver does not overwrite the desktop backdrop choice.
+- `gui saver rain calm` and `gui saver waves full` select saver mode and calm/full frame budget without changing wallpaper.
 - The Screensaver app now has a visible Live button that turns on slow animated wallpaper from the current wallpaper mode.
-- GUI wallpaper, cursor style, editor mode, and last editor path are persisted in `/config/gui.conf`.
+- The Screensaver app has separate wallpaper controls and screensaver preview controls.
+- GUI wallpaper, screensaver mode, calm-saver mode, cursor style, editor mode, last editor path, and mouse-speed preference are persisted in `/config/gui.conf`.
 - The GUI idle loop only advances wallpaper frames when live wallpaper is explicitly enabled, heavily throttled to reduce flicker and input lag.
 - Live wallpaper pauses briefly after clicks and keystrokes so typing stays smoother.
 - GUI editor redraws avoid console status repaint spam while typing, reducing blink.
+- Phase 0 rendering stability now separates full desktop repaint from active-window repaint.
+- Terminal and Editor typing/scrolling use active-window repaint, which avoids redrawing wallpaper, desktop icons, taskbar, and inactive windows for every keypress.
+- The framebuffer exposes `fb_begin_paint()` so partial repaint restores the old crosshair pixels before redrawing a window, then draws the cursor back on top.
+- `gui status` reports full and window repaint counters for debugging flicker regressions.
 - The GUI editor caret is aligned to the soft-font glyph baseline.
 - Extended keyboard handling now recognizes Home, End, Insert, Delete, right Ctrl, right Alt, and Super keys from PS/2 extended scancodes.
 - The Screensaver app exposes visible Lava, Rain, Stars, Waves, Preview, and Off controls.
 - `fb status` reports `hardware=on` with the framebuffer address and pitch when GRUB provides the pixel buffer.
 - GUI desktop icons are wired to real app focus/open behavior rather than decorative panels.
 - Clicking Terminal or the taskbar Start/Term button opens the inline GUI Terminal; clicking an app's Open Terminal button requests full terminal mode for that app's command.
+- The taskbar Start area now toggles a Start/app launcher menu instead of always opening Terminal.
+- The Start menu lists common apps with short plain-English hints and launches Files, Terminal, Editor, Rusa, Math Lab, Settings, Tasks, Network, Screensavers, and Security.
+- `gui start` toggles the launcher when the compositor is already running.
+- Super/Menu opens the launcher from the GUI; Alt+Tab cycles open app windows; Ctrl+Q closes the active window.
+- The keyboard driver now emits Super key press events to the GUI instead of only tracking the modifier internally.
 - VGA text output still exists for debugging and fallback, but the first boot surface is now the pixel desktop.
 - Vector graphics command surface supports line, rect, circle, and a sample scene.
 - Framebuffer layer now has an in-memory soft raster plane backing pixel, rectangle, text, GUI, and screensaver output.
@@ -766,13 +806,17 @@ GUI logs app
 GUI security app
 GUI close alias
 GUI Rusa embedded check
+GUI Rusa package browser
 GUI Math physics tab
 GUI Math LaTeX tab
 GUI calm wallpaper stable
 GUI live wallpaper opt-in
 GUI live wallpaper button
 GUI editor scroll/write
+GUI editor partial repaint
 GUI editor path open/save
+GUI editor math notes mode
+GUI editor md save
 GUI editor range tools
 GUI editor open/save dialogs
 GUI editor file dialog open
@@ -780,11 +824,16 @@ GUI editor file dialog save
 GUI file browser edit bridge
 GUI files new file
 GUI files rename
+GUI files copy
+GUI files move
 GUI files delete
 GUI files new folder
 GUI files up
 GUI files open terminal
 GUI terminal inline command with captured output
+GUI terminal partial repaint
+GUI terminal history recall
+GUI terminal cursor editing
 GUI window geometry commands
 GUI window minimize
 GUI window restore/maximize
@@ -793,6 +842,13 @@ GUI settings keyboard tab
 GUI multiwindow focus app
 GUI closes terminal reveals stack
 GUI z-order fallback
+GUI inactive live surfaces
+GUI inactive window click routes
+GUI inactive drag to front
+GUI start menu command
+GUI Super menu shortcut
+GUI Start button menu
+GUI launcher opens editor
 GUI local moved-window click
 vector/network descriptors
 network packet queue
@@ -888,5 +944,5 @@ Enter -> framebuffer terminal -> pwd/lang examples/edit works
 Latest QEMU selftest result:
 
 ```text
-selftest pass=90 fail=0
+selftest pass=127 fail=0
 ```

@@ -7,16 +7,7 @@
 
 #define JOB_MAX 6
 
-struct os_job {
-    int active;
-    const char* name;
-    const char* class_name;
-    uint32_t priority;
-    uint32_t ticks;
-    const char* state;
-};
-
-static struct os_job jobs[JOB_MAX] = {
+static struct job_info jobs[JOB_MAX] = {
     {1, "shell-repl", "interactive", 40, 0, "running"},
     {1, "log-flush", "io", 20, 0, "ready"},
     {1, "math-worker", "scientific", 95, 0, "ready"},
@@ -89,6 +80,16 @@ void jobs_account(const char* name, uint32_t ticks){
             return;
         }
     }
+}
+
+const struct job_info* jobs_at(uint32_t index){
+    if(index >= JOB_MAX)
+        return 0;
+    return &jobs[index];
+}
+
+uint32_t jobs_count(void){
+    return JOB_MAX;
 }
 
 void jobs_cmd(char* arg){

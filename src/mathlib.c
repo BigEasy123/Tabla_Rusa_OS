@@ -468,6 +468,41 @@ static void math_stats(char* arg){
     console_putc('\n');
 }
 
+static int parse_bool_word(const char* s){
+    return str_is(s, "true") || str_is(s, "yes") || str_is(s, "1");
+}
+
+static void math_logic(char* arg){
+    char* rest;
+    const char* action = first_arg(arg, &rest);
+    if(str_is(action, "implies")){
+        int a = parse_bool_word(first_arg(rest, &rest));
+        int b = parse_bool_word(first_arg(rest, &rest));
+        console_puts((!a || b) ? "true\n" : "false\n");
+    } else if(str_is(action, "modus")){
+        int premise = parse_bool_word(first_arg(rest, &rest));
+        int implication = parse_bool_word(first_arg(rest, &rest));
+        if(premise && implication)
+            console_puts("valid: conclusion follows\n");
+        else
+            console_puts("not proven: premise or implication is false\n");
+    } else if(str_is(action, "and")){
+        int a = parse_bool_word(first_arg(rest, &rest));
+        int b = parse_bool_word(first_arg(rest, &rest));
+        console_puts((a && b) ? "true\n" : "false\n");
+    } else if(str_is(action, "or")){
+        int a = parse_bool_word(first_arg(rest, &rest));
+        int b = parse_bool_word(first_arg(rest, &rest));
+        console_puts((a || b) ? "true\n" : "false\n");
+    } else {
+        console_puts("usage: math logic implies A B | modus PREMISE IMPLICATION | and A B | or A B\n");
+    }
+    process_set_running("compute", 1);
+    process_set_compute("compute", "logic-proof", 80, 0);
+    process_tick("compute", 1);
+    jobs_account("proof-worker", 1);
+}
+
 static void math_poly(char* arg){
     char* rest;
     const char* action = first_arg(arg, &rest);
@@ -1007,6 +1042,7 @@ void math_help(void){
     console_puts("math num gcd|lcm|modpow|prime\n");
     console_puts("math group cyclic|units|order\n");
     console_puts("math stats N...\n");
+    console_puts("math logic implies|modus|and|or\n");
     console_puts("math poly eval X COEFF...\n");
     console_puts("math object list|vector|matrix|dot|det|show\n");
     console_puts("math rat add|sub|mul|div|reduce|latex\n");
@@ -1030,6 +1066,7 @@ void math_cmd(char* arg){
     else if(str_is(topic, "modmat")) math_modmat(rest);
     else if(str_is(topic, "sym")) math_sym(rest);
     else if(str_is(topic, "stats")) math_stats(rest);
+    else if(str_is(topic, "logic") || str_is(topic, "proof")) math_logic(rest);
     else if(str_is(topic, "poly")) math_poly(rest);
     else if(str_is(topic, "object") || str_is(topic, "obj")) math_object_cmd(rest);
     else if(str_is(topic, "job")) math_job(rest);

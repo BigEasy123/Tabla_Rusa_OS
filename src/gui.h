@@ -12,6 +12,12 @@ int gui_handle_scroll(int amount);
 int gui_key_captures(int key);
 int gui_take_terminal_request(void);
 void gui_active_terminal_command(char* out, uint32_t max);
+void gui_terminal_input_text(char* out, uint32_t max);
+void gui_terminal_clear_input(void);
+uint32_t gui_full_repaint_count(void);
+uint32_t gui_window_repaint_count(void);
+uint32_t gui_inactive_live_render_count(void);
+int gui_launcher_is_open(void);
 void gui_cmd(char* arg);
 int gui_is_desktop_visible(void);
 

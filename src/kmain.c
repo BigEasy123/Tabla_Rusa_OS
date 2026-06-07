@@ -12,6 +12,7 @@
 #include "heap.h"
 #include "idt.h"
 #include "jobs.h"
+#include "kernel_modules.h"
 #include "keyboard.h"
 #include "lang.h"
 #include "loader.h"
@@ -1708,6 +1709,7 @@ void kmain(uint32_t mb_magic, uint32_t mb_info_addr){
     shell_session_init();
     editor_init();
     fs_init();
+    kernel_modules_init();
     block_init();
     process_init();
     process_set_compute("compute", "scientific", 90, 0);

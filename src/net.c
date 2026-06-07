@@ -402,6 +402,46 @@ uint32_t net_packet_count(void){
     return count;
 }
 
+uint32_t net_socket_count(void){
+    return SOCKET_MAX;
+}
+
+int net_socket_at(uint32_t index, struct net_socket_info* out){
+    struct socket_entry* sock;
+    if(!out || index >= SOCKET_MAX)
+        return -1;
+    sock = &sockets[index];
+    out->used = sock->used;
+    out->id = sock->id;
+    out->owner_pid = sock->owner_pid;
+    out->fd = sock->fd;
+    out->proto = sock->proto;
+    out->state = sock->state;
+    out->local_port = sock->local_port;
+    out->remote_port = sock->remote_port;
+    out->rx_packets = sock->rx_packets;
+    out->tx_packets = sock->tx_packets;
+    out->flood_score = sock->flood_score;
+    out->rx = sock->rx;
+    return 0;
+}
+
+int net_shield_enabled(void){
+    return shield_enabled;
+}
+
+int net_ip_masking_enabled(void){
+    return ip_masking;
+}
+
+uint32_t net_flood_threshold(void){
+    return flood_threshold;
+}
+
+uint32_t net_listen_port(void){
+    return (uint32_t)tcp_listen_port;
+}
+
 void net_disconnect_all(void){
     for(int i=0; i<SOCKET_MAX; i++)
         if(sockets[i].used && str_eq(sockets[i].proto, "tcp"))

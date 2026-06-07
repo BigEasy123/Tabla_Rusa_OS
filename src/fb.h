@@ -13,6 +13,7 @@ uint32_t fb_bpp(void);
 uint32_t fb_pitch(void);
 uint32_t fb_type(void);
 void fb_clear(uint32_t color);
+void fb_begin_paint(void);
 void fb_put_pixel(uint32_t x, uint32_t y, uint32_t color);
 void fb_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);
 void fb_draw_text(uint32_t x, uint32_t y, const char* text, uint32_t color);
