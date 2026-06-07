@@ -2,7 +2,7 @@
 
 This file is the living feature ledger for Tabla Rusa OS. Update it after each development prompt.
 
-Last updated: after modular networking/security expansion, research APIs, Rusa runtime APIs, science engine, MathCore plugin registry, and ProofCore proof states.
+Last updated: after GUI Terminal module extraction from the central GUI file.
 
 ## Current Kernel Shape
 
@@ -10,7 +10,7 @@ Last updated: after modular networking/security expansion, research APIs, Rusa r
 - Native shell/language surface is launched from `kmain.c`, while shell session state, editor state, dispatch bridge, and most OS behaviors live behind subsystem modules.
 - Boot includes ASCII intro, a full-stack autostart path, and `/home`, `/system`, `/proc`, `/pkg`, `/dev`, `/var/log`, `/share/docs`, and `/home/math`.
 - Boot writes `/system/kernel/modules.txt` and `/system/kernel/boundaries.txt` from `kernel_modules.c`, making subsystem ownership and future cleanup targets inspectable.
-- Kernel cleanup now has an explicit boundary descriptor for shell, editor, GUI, Rusa, FS, process, net, security, and math ownership.
+- Kernel cleanup now has an explicit boundary descriptor for shell, editor, GUI, GUI Terminal, Rusa, FS, process, net, security, and math ownership.
 - Repository docs now include `docs/ARCHITECTURE.md`, `docs/RUSA.md`, `docs/RUSA_RUNTIME.md`, `docs/GUI_APPS.md`, `docs/KERNEL_SUBSYSTEMS.md`, `docs/TESTING.md`, `docs/NETWORK_SECURITY.md`, `docs/RESEARCH_OS.md`, `docs/SCIENCE_ENGINE.md`, `docs/MATHCORE.md`, and `docs/PROOFCORE.md`.
 - The boot path now starts networking, GUI compositor state, scheduler state, and the crosshair pointer by default.
 - GUI boot writes `/system/gui/state.txt` so autostart state is inspectable after startup.
@@ -159,6 +159,7 @@ The scanner reports the file, line, column, readable issue title, and plain-Engl
 - Opening Terminal from inside an app still enables the framebuffer-backed full terminal for command output, Rusa commands, and editor prompts.
 - The Terminal desktop app now accepts typed commands directly in the GUI window, runs them through the shell dispatcher, and keeps a small GUI-side scrollback.
 - The GUI Terminal now captures real shell/console output from commands such as `pwd`, `help`, `lang`, `math`, `net`, and `tree` into its own window scrollback instead of only reporting that a command ran.
+- The GUI Terminal scrollback, input buffer, cursor, command history, selection, clipboard, and console capture logic now live in `gui_terminal.c`/`gui_terminal.h`, leaving `gui.c` responsible for window routing and rendering.
 - The GUI Terminal now has cursor-aware input editing with Left/Right/Home/End/Delete/Backspace and insertion at the cursor.
 - The GUI Terminal keeps a local command-history ring; Up recalls previous commands and Down moves forward/clears.
 - The GUI Terminal supports simple line selection, copy, and paste through `gui terminal select A [B]`, `gui terminal copy`, and `gui terminal paste`.
@@ -345,6 +346,7 @@ Inside the editor, use arrow keys to move between and within lines. Enter saves 
 ## Filesystem And VFS
 
 - RAM filesystem supports directories, files, read/write/append, copy, move, stat, tree, and current working directory.
+- RAM filesystem nodes now carry simple `rwx` permission bits through `fs_chmod`, `fs_permissions`, `fs_can_read`, `fs_can_write`, and `fs_permission_string`.
 - VFS layer tracks ramfs, procfs, sysfs, devfs, pkgfs, and mathfs namespaces.
 - Protected namespace write checks exist for `/proc`, `/system`, and `/boot`.
 - File descriptor layer added with `fd open/read/write/chunk/seek/tell/close/list`.
@@ -352,12 +354,16 @@ Inside the editor, use arrow keys to move between and within lines. Enter saves 
 - `fd list` shows the shell process table; `fd list PROC` and `fd all` inspect other process tables.
 - `fd openfor PROC PATH MODE` opens a descriptor in another process table for debugging.
 - File descriptors record owner PID, descriptor type, mode, path/label, and seek/tell offset accounting.
+- FD open/read/write paths now enforce RAMFS read/write permission bits in addition to VFS/security protected namespace checks.
 - Append mode now appends to existing RAMFS content instead of replacing it.
+- `fd pwrite FD COUNT TEXT` and `fd_write_chunk` perform partial writes at the current descriptor offset.
+- `fd dup FROM FD TO`, `fd inherit FROM TO`, `fd_dup_to_pid`, and `fd_inherit` duplicate descriptors across process tables.
+- `process_spawn` now inherits the current process descriptor table into the spawned process row.
 - Socket creation allocates a descriptor in the owning process table, so files and sockets share the same per-process namespace.
 - Socket descriptors can be used through `fd read` and `fd write`.
 - Stopping a process releases its descriptor table.
 - Block device layer added with an 8-sector RAM disk and save/load bridges.
-- Remaining work: descriptor inheritance, richer file permissions, partial writes, and persistent disk storage.
+- Remaining work: owners/groups, inherited directory permissions, and persistent disk-backed storage.
 
 Examples:
 
@@ -368,9 +374,12 @@ write /home/demo.txt hello
 cat /home/demo.txt
 fd open /home/demo.txt rw
 fd write 0 updated-through-fd
+fd seek 0 7
+fd pwrite 0 3 XYZ
 fd read 0
 fd close 0
 fd openfor compute /tmp/compute.txt rw
+fd inherit shell compute
 fd list compute
 fd all
 block status
@@ -431,7 +440,9 @@ TICK 24
 - Local IPC messages, tiny pipe buffers, and simple signals are available for in-kernel app/runtime coordination.
 - Job table tracks named workload classes and tick accounting.
 - Scheduler has fixed task contexts for shell, logger, network, gui, compute, and idle.
+- Scheduler now supports registering executable cooperative task callbacks with `sched_register_task`, so new runtime/app/science workers can be selected by the scheduler and actually run a callback.
 - Each scheduler task tracks state, quantum, run count, saved program counter, synthetic stack pointer, stack range, wake tick, and task step function.
+- Dynamically registered scheduler tasks create or wake matching process rows, account ticks/switches through the process table, and expose run counts through `sched_task_runs`.
 - Timer interrupts periodically dispatch scheduler tasks through `sched_on_timer`.
 - Scheduler compatibility APIs expose `scheduler_init`, `scheduler_tick`, `scheduler_pick_next`, and `scheduler_set_priority`.
 - `sched yield`, `sched step`, and `sched run N` manually drive task execution for debugging.
@@ -449,6 +460,7 @@ sched yield
 sched run 4
 sched trace compute
 sched quantum compute 12
+sched_register_task("runner", 3, runner_callback)
 sched sleep network
 sched wake network
 taskman top

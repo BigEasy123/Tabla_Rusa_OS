@@ -35,6 +35,83 @@ event service-audit -> log service state change
 +------------------------------------------------------------------------------+
 | Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
 +------------------------------------------------------------------------------+
+| focused: network  surface=planned  pos=174,72
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: network  surface=planned  pos=174,72
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: network  surface=planned  pos=174,72
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: network  surface=planned  pos=174,72
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: network  surface=planned  pos=174,72
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: network  surface=planned  pos=174,72
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: network  surface=planned  pos=174,72
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
 | focused: editor  surface=vga-text  pos=174,72
 |                                                                              |
 |  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |
@@ -57,7 +134,7 @@ event service-audit -> log service state change
 +------------------------------------------------------------------------------+
 | Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
 +------------------------------------------------------------------------------+
-| focused: network  surface=planned  pos=174,72
+| focused: editor  surface=vga-text  pos=174,72
 |                                                                              |
 |  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |
 |  app window: selected icon opens a focused GUI surface                       |
@@ -68,7 +145,7 @@ event service-audit -> log service state change
 +------------------------------------------------------------------------------+
 | Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
 +------------------------------------------------------------------------------+
-| focused: network  surface=planned  pos=174,72
+| focused: editor  surface=vga-text  pos=174,72
 |                                                                              |
 |  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |
 |  app window: selected icon opens a focused GUI surface                       |
@@ -79,7 +156,7 @@ event service-audit -> log service state change
 +------------------------------------------------------------------------------+
 | Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
 +------------------------------------------------------------------------------+
-| focused: network  surface=planned  pos=174,72
+| focused: editor  surface=vga-text  pos=174,72
 |                                                                              |
 |  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |
 |  app window: selected icon opens a focused GUI surface                       |
@@ -90,7 +167,74 @@ event service-audit -> log service state change
 +------------------------------------------------------------------------------+
 | Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
 +------------------------------------------------------------------------------+
-| focused: network  surface=planned  pos=174,72
+| focused: editor  surface=vga-text  pos=174,72
+|                                                                              |
+|  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |
+|  app window: selected icon opens a focused GUI surface                       |
+|  taskbar: Start, Files, Term, Math, Rusa, Set, Edit, Tasks, Net              |
+|  Click or Enter launches the selected app's shell command                    |
++------------------------------------------------------------------------------+
+| GUI mode: click icons/taskbar apps, S previews saver, Esc returns here       |
+Terminal opened from GUI desktop.
+rusa keywords
+import
+let
+set
+fn
+return
+if
+else
+while
+repeat
+nswitch
+case
+default
+parallel
+on
+run
+call
+print
+true
+false
+file
+process
+service
+window
+program
+math
+phys
+tr:/home $ rusa keywords
+import
+let
+set
+fn
+return
+if
+else
+while
+repeat
+nswitch
+case
+default
+parallel
+on
+run
+call
+print
+true
+false
+file
+process
+service
+window
+program
+math
+phys
+event service-audit -> log service state change
++------------------------------------------------------------------------------+
+| Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
++------------------------------------------------------------------------------+
+| focused: editor  surface=vga-text  pos=174,72
 |                                                                              |
 |  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |
 |  app window: selected icon opens a focused GUI surface                       |
@@ -101,7 +245,7 @@ event service-audit -> log service state change
 +------------------------------------------------------------------------------+
 | Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
 +------------------------------------------------------------------------------+
-| focused: network  surface=planned  pos=174,72
+| focused: editor  surface=vga-text  pos=174,72
 |                                                                              |
 |  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |
 |  app window: selected icon opens a focused GUI surface                       |
@@ -112,7 +256,7 @@ event service-audit -> log service state change
 +------------------------------------------------------------------------------+
 | Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
 +------------------------------------------------------------------------------+
-| focused: network  surface=planned  pos=174,72
+| focused: editor  surface=vga-text  pos=174,72
 |                                                                              |
 |  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |
 |  app window: selected icon opens a focused GUI surface                       |
@@ -123,7 +267,7 @@ event service-audit -> log service state change
 +------------------------------------------------------------------------------+
 | Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
 +------------------------------------------------------------------------------+
-| focused: network  surface=planned  pos=174,72
+| focused: editor  surface=vga-text  pos=174,72
 |                                                                              |
 |  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |
 |  app window: selected icon opens a focused GUI surface                       |
@@ -134,7 +278,7 @@ event service-audit -> log service state change
 +------------------------------------------------------------------------------+
 | Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
 +------------------------------------------------------------------------------+
-| focused: network  surface=planned  pos=174,72
+| focused: editor  surface=vga-text  pos=174,72
 |                                                                              |
 |  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |
 |  app window: selected icon opens a focused GUI surface                       |
@@ -145,7 +289,7 @@ event service-audit -> log service state change
 +------------------------------------------------------------------------------+
 | Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
 +------------------------------------------------------------------------------+
-| focused: network  surface=planned  pos=174,72
+| focused: editor  surface=vga-text  pos=174,72
 |                                                                              |
 |  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |
 |  app window: selected icon opens a focused GUI surface                       |
@@ -156,7 +300,7 @@ event service-audit -> log service state change
 +------------------------------------------------------------------------------+
 | Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
 +------------------------------------------------------------------------------+
-| focused: network  surface=planned  pos=174,72
+| focused: editor  surface=vga-text  pos=174,72
 |                                                                              |
 |  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |
 |  app window: selected icon opens a focused GUI surface                       |
@@ -167,7 +311,7 @@ event service-audit -> log service state change
 +------------------------------------------------------------------------------+
 | Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
 +------------------------------------------------------------------------------+
-| focused: network  surface=planned  pos=174,72
+| focused: editor  surface=vga-text  pos=174,72
 |                                                                              |
 |  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |
 |  app window: selected icon opens a focused GUI surface                       |
@@ -178,7 +322,7 @@ event service-audit -> log service state change
 +------------------------------------------------------------------------------+
 | Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
 +------------------------------------------------------------------------------+
-| focused: network  surface=planned  pos=174,72
+| focused: editor  surface=vga-text  pos=174,72
 |                                                                              |
 |  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |
 |  app window: selected icon opens a focused GUI surface                       |
@@ -189,7 +333,7 @@ event service-audit -> log service state change
 +------------------------------------------------------------------------------+
 | Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
 +------------------------------------------------------------------------------+
-| focused: network  surface=planned  pos=174,72
+| focused: editor  surface=vga-text  pos=174,72
 |                                                                              |
 |  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |
 |  app window: selected icon opens a focused GUI surface                       |
@@ -200,7 +344,7 @@ event service-audit -> log service state change
 +------------------------------------------------------------------------------+
 | Tabla Rusa GUI :: desktop icons + taskbar         tabs: shell editor saver net |
 +------------------------------------------------------------------------------+
-| focused: network  surface=planned  pos=174,72
+| focused: editor  surface=vga-text  pos=174,72
 |                                                                              |
 |  desktop icons: Files Terminal Math Rusa Settings Editor + system tools      |
 |  app window: selected icon opens a focused GUI surface                       |

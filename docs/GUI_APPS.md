@@ -22,7 +22,7 @@ gui boot recovery
 ## App Surfaces
 
 - Files: browse RAM filesystem, create, rename, copy, move, delete, and open with Editor/Terminal/Rusa.
-- Terminal: GUI command input, captured output, cursor editing, history, scrollback, line selection, copy, and paste.
+- Terminal: GUI command input, captured output, cursor editing, history, scrollback, line selection, copy, and paste. Its reusable state/input layer lives in `gui_terminal.c`.
 - Editor: paper/code/math modes, text entry, scrolling, file open/save/save-as.
 - Rusa Workbench: source examples, docs, check/run, diagnostics, package/import visualization.
 - Math Lab: vector, matrix, group, physics, LaTeX, jobs/proof result panels.

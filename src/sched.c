@@ -7,8 +7,9 @@
 #include "sched.h"
 #include "timer.h"
 
-#define SCHED_TASK_MAX 6
+#define SCHED_TASK_MAX 10
 #define SCHED_STACK_WORDS 64
+#define SCHED_NAME_LEN 24
 
 enum sched_state {
     SCHED_READY,
@@ -34,10 +35,12 @@ struct sched_task {
     uint32_t wake_tick;
     struct sched_context ctx;
     void (*entry)(struct sched_task* task);
+    sched_task_entry_fn external_entry;
 };
 
 static uint32_t stacks[SCHED_TASK_MAX][SCHED_STACK_WORDS];
 static struct sched_task tasks[SCHED_TASK_MAX];
+static char task_names[SCHED_TASK_MAX][SCHED_NAME_LEN];
 static size_t current_task = 0;
 static uint32_t total_switches = 0;
 
@@ -46,12 +49,27 @@ static char lower_char(char c){
 }
 
 static int str_eq(const char* a, const char* b){
+    if(!a || !b)
+        return 0;
     while(*a && *b){
         if(lower_char(*a) != lower_char(*b)) return 0;
         a++;
         b++;
     }
     return *a == 0 && *b == 0;
+}
+
+static void copy_text(char* dst, const char* src, uint32_t max){
+    uint32_t i = 0;
+    if(max == 0)
+        return;
+    if(!src)
+        src = "";
+    while(src[i] && i + 1 < max){
+        dst[i] = src[i];
+        i++;
+    }
+    dst[i] = 0;
 }
 
 static int is_space(char c){
@@ -132,13 +150,21 @@ static void task_setup(size_t id, const char* name, enum sched_state state,
     tasks[id].ctx.sp = tasks[id].ctx.stack_base;
     tasks[id].ctx.budget = quantum;
     tasks[id].entry = entry;
+    tasks[id].external_entry = 0;
 }
 
 static struct sched_task* find_task(const char* name){
     for(size_t i=0; i<SCHED_TASK_MAX; i++)
-        if(str_eq(tasks[i].name, name))
+        if(tasks[i].name && str_eq(tasks[i].name, name))
             return &tasks[i];
     return 0;
+}
+
+static size_t free_task_slot(void){
+    for(size_t i=0; i<SCHED_TASK_MAX; i++)
+        if(!tasks[i].name)
+            return i;
+    return SCHED_TASK_MAX;
 }
 
 void sched_init(void){
@@ -148,6 +174,13 @@ void sched_init(void){
     task_setup(3, "gui", SCHED_SLEEPING, 3, task_gui);
     task_setup(4, "compute", SCHED_READY, 8, task_compute);
     task_setup(5, "idle", SCHED_READY, 1, task_idle);
+    for(size_t i=6; i<SCHED_TASK_MAX; i++){
+        tasks[i].name = 0;
+        tasks[i].state = SCHED_BLOCKED;
+        tasks[i].entry = 0;
+        tasks[i].external_entry = 0;
+        task_names[i][0] = 0;
+    }
     current_task = 0;
     total_switches = 0;
     fs_append_line("/var/log/system.log", "sched: timer-driven task contexts online");
@@ -176,6 +209,8 @@ static void run_task(size_t id){
     jobs_account("scheduler", task->quantum);
     if(task->entry)
         task->entry(task);
+    if(task->external_entry)
+        task->external_entry(task->name, task->quantum);
     if(task->state == SCHED_RUNNING)
         task->state = SCHED_READY;
 }
@@ -209,7 +244,47 @@ uint32_t sched_total_switches(void){
     return total_switches;
 }
 
+int sched_register_task(const char* name, uint32_t quantum, sched_task_entry_fn entry){
+    struct sched_task* task;
+    size_t id;
+    if(!name || !name[0] || !entry)
+        return -1;
+    task = find_task(name);
+    if(task){
+        task->quantum = quantum ? quantum : 1;
+        task->external_entry = entry;
+        task->state = SCHED_READY;
+        process_spawn(name);
+        return 0;
+    }
+    id = free_task_slot();
+    if(id >= SCHED_TASK_MAX)
+        return -2;
+    copy_text(task_names[id], name, sizeof(task_names[id]));
+    task_setup(id, task_names[id], SCHED_READY, quantum ? quantum : 1, 0);
+    tasks[id].external_entry = entry;
+    process_spawn(name);
+    process_set_background(name, 1);
+    return 0;
+}
+
+int sched_task_ready(const char* name){
+    struct sched_task* task = find_task(name);
+    if(!task)
+        return -1;
+    task->state = SCHED_READY;
+    process_set_running(name, 1);
+    return 0;
+}
+
+uint32_t sched_task_runs(const char* name){
+    struct sched_task* task = find_task(name);
+    return task ? task->runs : 0;
+}
+
 static void print_task(const struct sched_task* task, size_t id){
+    if(!task->name)
+        return;
     console_puts(id == current_task ? "* " : "  ");
     console_puts(task->name);
     console_puts(" state=");

@@ -18,6 +18,7 @@
 #include "timer.h"
 #include "window.h"
 #include "gui.h"
+#include "gui_terminal.h"
 
 static int running = 0;
 static int autostarted = 0;
@@ -53,7 +54,6 @@ static char file_dir[96] = "/home";
 static char file_selected[96] = "/home/readme.txt";
 static uint32_t file_last_click_index = 9999;
 static uint32_t file_last_click_tick = 0;
-static char terminal_view[160] = "Terminal ready. Open an app command or press Enter.";
 static char rusa_view[160] = "Rusa Workbench ready. Choose Check or Run.";
 static char rusa_lines[5][96] = {
     "Rusa Workbench ready.",
@@ -77,19 +77,6 @@ static char math_lines[5][96] = {
 static char editor_clipboard[512] = "";
 static char editor_find_text[40] = "";
 static int editor_find_line = -1;
-static char terminal_input[96] = "";
-static uint32_t terminal_cursor = 0;
-static char terminal_lines[24][96];
-static uint32_t terminal_count = 0;
-static uint32_t terminal_top = 0;
-static int terminal_focused = 0;
-static char terminal_history[8][96];
-static uint32_t terminal_history_count = 0;
-static int terminal_history_view = -1;
-static char terminal_clipboard[256] = "";
-static uint32_t terminal_sel_start = 0;
-static uint32_t terminal_sel_end = 0;
-static int terminal_selection = 0;
 static uint32_t gui_win_x = 174;
 static uint32_t gui_win_y = 72;
 static uint32_t gui_win_w = 820;
@@ -445,7 +432,7 @@ static void app_close(const char* app){
     if(mask == 0){
         copy_text(active_app, "desktop", sizeof(active_app));
         editor_focused = 0;
-        terminal_focused = 0;
+        gui_terminal_set_focused(0);
         return;
     }
     z_remove_app(app);
@@ -454,7 +441,7 @@ static void app_close(const char* app){
     if(mask == APP_EDITOR)
         editor_focused = 0;
     if(mask == APP_TERM)
-        terminal_focused = 0;
+        gui_terminal_set_focused(0);
     if(app_mask(active_app) == mask)
         app_focus_next_or_desktop();
 }
@@ -467,7 +454,7 @@ static void app_minimize(const char* app){
     if(mask == APP_EDITOR)
         editor_focused = 0;
     if(mask == APP_TERM)
-        terminal_focused = 0;
+        gui_terminal_set_focused(0);
     if(app_mask(active_app) == mask)
         app_focus_next_or_desktop();
 }
@@ -594,205 +581,6 @@ static void app_draw_text(uint32_t x, uint32_t y, const char* text, uint32_t col
 
 static void gui_note_activity(void){
     gui_busy_until = timer_ticks() + GUI_INPUT_QUIET_TICKS;
-}
-
-static void terminal_add_line(const char* text){
-    if(terminal_count < 24){
-        copy_text(terminal_lines[terminal_count++], text, sizeof(terminal_lines[0]));
-    } else {
-        for(uint32_t i=1; i<24; i++)
-            copy_text(terminal_lines[i - 1], terminal_lines[i], sizeof(terminal_lines[i - 1]));
-        copy_text(terminal_lines[23], text, sizeof(terminal_lines[23]));
-    }
-    terminal_top = terminal_count > 8 ? terminal_count - 8 : 0;
-}
-
-static uint32_t terminal_add_capture(const char* text){
-    char line[96];
-    uint32_t count = 0;
-    uint32_t pos = 0;
-    for(uint32_t i=0; text && text[i]; i++){
-        char c = text[i];
-        if(c == '\r')
-            continue;
-        if(c == '\n'){
-            line[pos] = 0;
-            terminal_add_line(pos ? line : "");
-            if(count == 0 && pos)
-                copy_text(terminal_view, line, sizeof(terminal_view));
-            pos = 0;
-            count++;
-        } else if(pos + 1 < sizeof(line)){
-            line[pos++] = c;
-        }
-    }
-    if(pos){
-        line[pos] = 0;
-        terminal_add_line(line);
-        if(count == 0)
-            copy_text(terminal_view, line, sizeof(terminal_view));
-        count++;
-    }
-    return count;
-}
-
-static uint32_t terminal_sel_lo(void){
-    return terminal_sel_start < terminal_sel_end ? terminal_sel_start : terminal_sel_end;
-}
-
-static uint32_t terminal_sel_hi(void){
-    return terminal_sel_start < terminal_sel_end ? terminal_sel_end : terminal_sel_start;
-}
-
-static int terminal_line_selected(uint32_t line){
-    return terminal_selection && line >= terminal_sel_lo() && line <= terminal_sel_hi();
-}
-
-static void terminal_insert_char(char c);
-
-static void terminal_select_range(uint32_t start, uint32_t end){
-    if(terminal_count == 0){
-        terminal_selection = 0;
-        return;
-    }
-    if(start >= terminal_count) start = terminal_count - 1;
-    if(end >= terminal_count) end = terminal_count - 1;
-    terminal_sel_start = start;
-    terminal_sel_end = end;
-    terminal_selection = 1;
-    if(terminal_sel_lo() < terminal_top)
-        terminal_top = terminal_sel_lo();
-    if(terminal_sel_hi() >= terminal_top + 8)
-        terminal_top = terminal_sel_hi() - 7;
-}
-
-static void terminal_copy_selection(void){
-    uint32_t pos = 0;
-    terminal_clipboard[0] = 0;
-    if(!terminal_selection || terminal_count == 0)
-        return;
-    for(uint32_t row=terminal_sel_lo(); row<=terminal_sel_hi() && row<terminal_count; row++){
-        for(uint32_t col=0; terminal_lines[row][col] && pos + 1 < sizeof(terminal_clipboard); col++)
-            terminal_clipboard[pos++] = terminal_lines[row][col];
-        if(pos + 1 < sizeof(terminal_clipboard))
-            terminal_clipboard[pos++] = '\n';
-    }
-    terminal_clipboard[pos] = 0;
-}
-
-static void terminal_paste_clipboard(void){
-    uint32_t len = text_len32(terminal_input);
-    for(uint32_t i=0; terminal_clipboard[i] && len + 1 < sizeof(terminal_input); i++){
-        char c = terminal_clipboard[i];
-        if(c == '\n' || c == '\r')
-            c = ' ';
-        terminal_insert_char(c);
-        len = text_len32(terminal_input);
-    }
-}
-
-static void terminal_seed(void){
-    if(terminal_count)
-        return;
-    terminal_add_line("Tabla Rusa GUI Terminal");
-    terminal_add_line("Type commands here, Enter runs them.");
-}
-
-static void terminal_set_input(const char* text){
-    copy_text(terminal_input, text, sizeof(terminal_input));
-    terminal_cursor = text_len32(terminal_input);
-}
-
-static void terminal_history_add_local(const char* text){
-    if(!text || !text[0])
-        return;
-    if(terminal_history_count < 8){
-        copy_text(terminal_history[terminal_history_count++], text, sizeof(terminal_history[0]));
-    } else {
-        for(uint32_t i=1; i<8; i++)
-            copy_text(terminal_history[i - 1], terminal_history[i], sizeof(terminal_history[i - 1]));
-        copy_text(terminal_history[7], text, sizeof(terminal_history[7]));
-    }
-    terminal_history_view = -1;
-}
-
-static void terminal_history_prev_local(void){
-    if(terminal_history_count == 0)
-        return;
-    if(terminal_history_view < 0)
-        terminal_history_view = (int)terminal_history_count - 1;
-    else if(terminal_history_view > 0)
-        terminal_history_view--;
-    terminal_set_input(terminal_history[terminal_history_view]);
-}
-
-static void terminal_history_next_local(void){
-    if(terminal_history_view < 0)
-        return;
-    if(terminal_history_view + 1 < (int)terminal_history_count){
-        terminal_history_view++;
-        terminal_set_input(terminal_history[terminal_history_view]);
-    } else {
-        terminal_history_view = -1;
-        terminal_set_input("");
-    }
-}
-
-static void terminal_insert_char(char c){
-    uint32_t len = text_len32(terminal_input);
-    if(len + 1 >= sizeof(terminal_input))
-        return;
-    if(terminal_cursor > len)
-        terminal_cursor = len;
-    for(uint32_t i=len + 1; i>terminal_cursor; i--)
-        terminal_input[i] = terminal_input[i - 1];
-    terminal_input[terminal_cursor++] = c;
-}
-
-static void terminal_backspace(void){
-    uint32_t len = text_len32(terminal_input);
-    if(len == 0 || terminal_cursor == 0)
-        return;
-    if(terminal_cursor > len)
-        terminal_cursor = len;
-    for(uint32_t i=terminal_cursor - 1; i<len; i++)
-        terminal_input[i] = terminal_input[i + 1];
-    terminal_cursor--;
-}
-
-static void terminal_delete_char(void){
-    uint32_t len = text_len32(terminal_input);
-    if(terminal_cursor >= len)
-        return;
-    for(uint32_t i=terminal_cursor; i<len; i++)
-        terminal_input[i] = terminal_input[i + 1];
-}
-
-static void terminal_run_input(void){
-    char cmd[96];
-    char line[120];
-    char captured[768];
-    uint32_t captured_lines;
-    if(!terminal_input[0])
-        return;
-    copy_text(cmd, terminal_input, sizeof(cmd));
-    copy_text(line, "$ ", sizeof(line));
-    append_text(line, cmd, sizeof(line));
-    terminal_add_line(line);
-    copy_text(terminal_view, cmd, sizeof(terminal_view));
-    terminal_history_add_local(cmd);
-    shell_history_add(cmd);
-    console_capture_begin(captured, sizeof(captured));
-    shell_eval(cmd);
-    console_capture_end();
-    captured_lines = terminal_add_capture(captured);
-    if(captured_lines == 0){
-        copy_text(line, "ok: ", sizeof(line));
-        append_text(line, cmd, sizeof(line));
-        terminal_add_line(line);
-        copy_text(terminal_view, line, sizeof(terminal_view));
-    }
-    terminal_set_input("");
 }
 
 static void rusa_set_line(uint32_t row, const char* text){
@@ -1555,21 +1343,13 @@ void gui_active_terminal_command(char* out, uint32_t max){
     else if(active_is("editor")){
         copy_text(out, "edit ", max);
         append_text(out, editor_path(), max);
-    } else if(active_is("terminal")) copy_text(out, terminal_view, max);
-}
-
-void gui_terminal_input_text(char* out, uint32_t max){
-    copy_text(out, terminal_input, max);
-}
-
-void gui_terminal_clear_input(void){
-    terminal_set_input("");
+    } else if(active_is("terminal")) copy_text(out, gui_terminal_view(), max);
 }
 
 static void request_terminal_command(const char* command, const char* notice){
     copy_text(launch_override, command, sizeof(launch_override));
     copy_text(launch_notice, notice, sizeof(launch_notice));
-    copy_text(terminal_view, command, sizeof(terminal_view));
+    gui_terminal_set_view(command);
     terminal_requested = 1;
 }
 
@@ -1580,9 +1360,9 @@ static void gui_focus_app(const char* app){
     copy_text(active_app, app, sizeof(active_app));
     load_active_window_geometry();
     editor_focused = str_eq(app, "editor") ? editor_focused : 0;
-    terminal_focused = str_eq(app, "terminal");
+    gui_terminal_set_focused(str_eq(app, "terminal"));
     if(str_eq(app, "terminal")){
-        terminal_seed();
+        gui_terminal_seed();
         window_focus("shell");
     }
     else if(str_eq(app, "inspector") || str_eq(app, "taskman")) window_focus("inspector");
@@ -1872,27 +1652,29 @@ static void draw_math_surface(void){
 static void draw_terminal_surface(void){
     char prompt[120];
     uint32_t cx;
+    uint32_t top = gui_terminal_top();
+    uint32_t count = gui_terminal_count();
+    uint32_t visible = count > top ? count - top : 0;
     app_fill_rect(226, 208, 700, 350, 0x101820);
     app_fill_rect(226, 208, 700, 28, 0x1E2A36);
     app_draw_text(244, 226, "GUI Terminal", 0x8EE8A0);
-    uint32_t visible = terminal_count - terminal_top;
     if(visible > 8) visible = 8;
     for(uint32_t i=0; i<visible; i++){
-        uint32_t row = terminal_top + i;
-        if(terminal_line_selected(row))
+        uint32_t row = top + i;
+        if(gui_terminal_line_selected(row))
             app_fill_rect(244, 252 + i * 24, 660, 20, 0x294058);
-        app_draw_text(250, 268 + i * 24, terminal_lines[row], terminal_line_selected(row) ? 0x8EE8A0 : 0xFFFFFF);
+        app_draw_text(250, 268 + i * 24, gui_terminal_line(row), gui_terminal_line_selected(row) ? 0x8EE8A0 : 0xFFFFFF);
     }
     copy_text(prompt, "tr:gui $ ", sizeof(prompt));
-    append_text(prompt, terminal_input, sizeof(prompt));
-    app_fill_rect(244, 502, 660, 32, terminal_focused ? 0x213040 : 0x18222C);
-    app_draw_text(252, 522, prompt, terminal_focused ? 0x8EE8A0 : 0xCFE8FF);
-    if(terminal_focused){
-        cx = 252 + (9 + terminal_cursor) * GUI_FONT_ADVANCE;
+    append_text(prompt, gui_terminal_input(), sizeof(prompt));
+    app_fill_rect(244, 502, 660, 32, gui_terminal_focused() ? 0x213040 : 0x18222C);
+    app_draw_text(252, 522, prompt, gui_terminal_focused() ? 0x8EE8A0 : 0xCFE8FF);
+    if(gui_terminal_focused()){
+        cx = 252 + (9 + gui_terminal_cursor()) * GUI_FONT_ADVANCE;
         if(cx > 894) cx = 894;
         app_fill_rect(cx, 522, 2, 9, 0x8EE8A0);
     }
-    app_draw_text(250, 548, terminal_clipboard[0] ? "select/copy/paste available. Clipboard has terminal text." : "Click input area, type command, Enter runs in place.", 0xCFE8FF);
+    app_draw_text(250, 548, gui_terminal_clipboard_has_text() ? "select/copy/paste available. Clipboard has terminal text." : "Click input area, type command, Enter runs in place.", 0xCFE8FF);
 }
 
 struct gui_render_context {
@@ -2427,7 +2209,7 @@ static void draw_active_app_detail(void){
         draw_app_line(2, "Terminal", "Enter opens: inspect memory");
     } else if(active_is("terminal")){
         draw_app_line(1, "Shell", "GUI terminal surface");
-        draw_app_line(2, "Last", terminal_view);
+        draw_app_line(2, "Last", gui_terminal_view());
         draw_terminal_surface();
     } else {
         draw_app_line(1, "Shell", "object language commands live here");
@@ -2651,24 +2433,20 @@ void gui_cmd(char* arg){
             const char* b_arg = first_arg(rest, &rest);
             uint32_t a = parse_u32(a_arg);
             uint32_t b = b_arg[0] ? parse_u32(b_arg) : a;
-            terminal_select_range(a, b);
+            gui_terminal_select_range(a, b);
             copy_text(launch_notice, "terminal lines selected", sizeof(launch_notice));
             console_puts("gui terminal: selected lines\n");
         } else if(str_eq(sub, "copy")){
-            terminal_copy_selection();
-            copy_text(launch_notice, terminal_clipboard[0] ? "terminal copied" : "terminal copy empty", sizeof(launch_notice));
-            console_puts(terminal_clipboard[0] ? "gui terminal: copied\n" : "gui terminal: nothing selected\n");
+            gui_terminal_copy_selection();
+            copy_text(launch_notice, gui_terminal_clipboard_has_text() ? "terminal copied" : "terminal copy empty", sizeof(launch_notice));
+            console_puts(gui_terminal_clipboard_has_text() ? "gui terminal: copied\n" : "gui terminal: nothing selected\n");
         } else if(str_eq(sub, "paste")){
-            terminal_paste_clipboard();
-            terminal_focused = 1;
+            gui_terminal_paste_clipboard();
+            gui_terminal_set_focused(1);
             copy_text(launch_notice, "terminal pasted", sizeof(launch_notice));
             console_puts("gui terminal: pasted\n");
         } else if(str_eq(sub, "clear")){
-            terminal_count = 0;
-            terminal_top = 0;
-            terminal_selection = 0;
-            terminal_clipboard[0] = 0;
-            terminal_seed();
+            gui_terminal_clear();
             console_puts("gui terminal: cleared\n");
         } else {
             console_puts("usage: gui terminal select A [B] | copy | paste | clear\n");
@@ -3348,48 +3126,18 @@ static int editor_handle_key(int key){
 }
 
 static int terminal_handle_key(int key){
-    uint32_t len;
-    if(!(active_is("terminal") && app_is_open("terminal") && terminal_focused))
+    if(!(active_is("terminal") && app_is_open("terminal") && gui_terminal_focused()))
         return 0;
     gui_note_activity();
-    len = text_len32(terminal_input);
-    if(key == '\n'){
-        terminal_run_input();
-    } else if(key == 8 || key == 127){
-        terminal_backspace();
-    } else if(key == KB_KEY_DELETE){
-        terminal_delete_char();
-    } else if(key == KB_KEY_LEFT){
-        if(terminal_cursor > 0)
-            terminal_cursor--;
-    } else if(key == KB_KEY_RIGHT){
-        if(terminal_cursor < len)
-            terminal_cursor++;
-    } else if(key == KB_KEY_HOME){
-        terminal_cursor = 0;
-    } else if(key == KB_KEY_END){
-        terminal_cursor = len;
-    } else if(key == KB_KEY_UP){
-        terminal_history_prev_local();
-    } else if(key == KB_KEY_DOWN){
-        terminal_history_next_local();
-    } else if(key == KB_KEY_PAGE_UP){
-        terminal_top = terminal_top > 0 ? terminal_top - 1 : 0;
-    } else if(key == KB_KEY_PAGE_DOWN){
-        if(terminal_top + 8 < terminal_count)
-            terminal_top++;
-    } else if(key >= 32 && key <= 126){
-        terminal_insert_char((char)key);
-    } else {
+    if(!gui_terminal_handle_key(key))
         return 0;
-    }
     gui_redraw_active_window();
     console_input_write("GUI Terminal - type commands in the window");
     return 1;
 }
 
 int gui_key_captures(int key){
-    if(active_is("terminal") && app_is_open("terminal") && terminal_focused)
+    if(active_is("terminal") && app_is_open("terminal") && gui_terminal_focused())
         return key == '\n' || key == 8 || key == 127 ||
                key == KB_KEY_LEFT || key == KB_KEY_RIGHT || key == KB_KEY_UP || key == KB_KEY_DOWN ||
                key == KB_KEY_HOME || key == KB_KEY_END || key == KB_KEY_DELETE ||
@@ -3472,10 +3220,7 @@ int gui_handle_scroll(int amount){
     uint32_t sy = design_y_from_screen(mouse_y());
     if(desktop_mode && active_is("terminal") && app_is_open("terminal")){
         if(sx >= 226 && sx < 926 && sy >= 208 && sy < 558){
-            if(amount > 0)
-                terminal_top = terminal_top > 0 ? terminal_top - 1 : 0;
-            else if(terminal_top + 8 < terminal_count)
-                terminal_top++;
+            gui_terminal_scroll(amount);
             gui_redraw_active_window();
             return 1;
         }
@@ -3597,8 +3342,8 @@ static void gui_open_app(const char* app){
     launcher_open = 0;
     if(str_eq(app, "terminal")){
         copy_text(launch_notice, "opening terminal", sizeof(launch_notice));
-        terminal_seed();
-        terminal_focused = 1;
+        gui_terminal_seed();
+        gui_terminal_set_focused(1);
     } else if(str_eq(app, "saver")){
         saver_backdrop = 1;
         saver_live = 0;
@@ -3835,7 +3580,7 @@ void gui_handle_click(uint32_t x, uint32_t y){
             copy_text(launch_notice, "input setting changed", sizeof(launch_notice));
         }
     } else if(active_is("terminal") && app_is_open("terminal") && sx >= 244 && sx < 904 && sy >= 502 && sy < 534){
-        terminal_focused = 1;
+        gui_terminal_set_focused(1);
         copy_text(launch_notice, "terminal input ready", sizeof(launch_notice));
     } else if(active_is("editor") && app_is_open("editor") && sx >= 388 && sx < 906 && sy >= 346 && sy < 566){
         editor_focused = 1;

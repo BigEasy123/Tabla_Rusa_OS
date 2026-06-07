@@ -289,6 +289,7 @@ int process_spawn(const char* name){
     }
     if(!proc)
         return -1;
+    fd_inherit(1, proc->pid);
     proc->running = 1;
     proc->state = PROCESS_READY;
     return 0;

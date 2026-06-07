@@ -179,9 +179,13 @@ int fd_open_for_pid(uint32_t pid, const char* path, const char* mode){
         return -3;
     if(!writable){
         const char* text;
+        if(!fs_can_read(path))
+            return -5;
         if(fs_read(path, &text) != 0)
             return -1;
     } else {
+        if(fs_stat(path, 0, 0) == 0 && !fs_can_write(path))
+            return -5;
         if(fs_touch(path) != 0)
             return -1;
     }
@@ -226,6 +230,8 @@ int fd_read(int fd, const char** out){
     if(!entry) return -1;
     if(str_eq(entry->type, "socket"))
         return net_fd_read(entry->owner_pid, fd, out);
+    if(!fs_can_read(entry->path))
+        return -2;
     int r = fs_read(entry->path, out);
     if(r == 0)
         entry->offset = str_len(*out);
@@ -241,6 +247,8 @@ int fd_read_chunk(int fd, char* out, size_t max){
         return -1;
     if(str_eq(entry->type, "socket"))
         return -2;
+    if(!fs_can_read(entry->path))
+        return -4;
     if(fs_read(entry->path, &text) != 0)
         return -3;
     len = str_len(text);
@@ -260,7 +268,7 @@ int fd_write(int fd, const char* text){
     if(!entry || !fd_can_write_mode(entry->mode)) return -1;
     if(str_eq(entry->type, "socket"))
         return net_fd_write(entry->owner_pid, fd, text);
-    if(!vfs_can_write(entry->path) || !security_can_write(entry->path)) return -2;
+    if(!vfs_can_write(entry->path) || !security_can_write(entry->path) || !fs_can_write(entry->path)) return -2;
     if(entry->mode[0] == 'a'){
         merged[0] = 0;
         if(fs_read(entry->path, &existing) == 0)
@@ -277,6 +285,44 @@ int fd_write(int fd, const char* text){
         return -3;
     entry->offset = str_len(text);
     return 0;
+}
+
+int fd_write_chunk(int fd, const char* text, size_t count){
+    struct fd_entry* entry = fd_find_for_pid(current_pid(), fd);
+    char merged[512];
+    const char* existing = "";
+    size_t existing_len;
+    size_t write_len = 0;
+    size_t pos = 0;
+    size_t suffix_start;
+    if(!entry || !fd_can_write_mode(entry->mode) || !text)
+        return -1;
+    if(str_eq(entry->type, "socket"))
+        return -2;
+    if(!vfs_can_write(entry->path) || !security_can_write(entry->path) || !fs_can_write(entry->path))
+        return -3;
+    if(fs_read(entry->path, &existing) != 0)
+        existing = "";
+    existing_len = str_len(existing);
+    if(entry->offset > existing_len)
+        entry->offset = existing_len;
+    while(write_len < count && text[write_len])
+        write_len++;
+    for(size_t i=0; i<entry->offset && pos + 1 < sizeof(merged); i++)
+        merged[pos++] = existing[i];
+    for(size_t i=0; i<write_len && pos + 1 < sizeof(merged); i++)
+        merged[pos++] = text[i];
+    suffix_start = entry->offset + write_len;
+    if(suffix_start < existing_len){
+        for(size_t i=suffix_start; existing[i] && pos + 1 < sizeof(merged); i++)
+            merged[pos++] = existing[i];
+    }
+    merged[pos] = 0;
+    events_emit("fs.write");
+    if(fs_write(entry->path, merged) != 0)
+        return -4;
+    entry->offset += write_len;
+    return (int)write_len;
 }
 
 int fd_seek(int fd, size_t offset){
@@ -297,6 +343,34 @@ size_t fd_tell(int fd){
     if(!entry)
         return 0;
     return entry->offset;
+}
+
+int fd_dup_to_pid(uint32_t from_pid, int fd, uint32_t to_pid){
+    struct fd_entry* src = fd_find_for_pid(from_pid, fd);
+    struct fd_entry* dst;
+    if(!src)
+        return -1;
+    dst = alloc_for_pid(to_pid);
+    if(!dst)
+        return -2;
+    dst->type = src->type;
+    dst->offset = src->offset;
+    str_copy(dst->path, src->path, sizeof(dst->path));
+    str_copy(dst->mode, src->mode, sizeof(dst->mode));
+    return dst->local_id;
+}
+
+int fd_inherit(uint32_t parent_pid, uint32_t child_pid){
+    struct fd_table* table = table_for_pid(parent_pid);
+    int copied = 0;
+    if(!table)
+        return -1;
+    for(size_t i=0; i<FD_PER_PROC_MAX; i++){
+        if(table->entries[i].used &&
+           fd_dup_to_pid(parent_pid, table->entries[i].local_id, child_pid) >= 0)
+            copied++;
+    }
+    return copied;
 }
 
 int fd_close_process(uint32_t pid){
@@ -394,6 +468,37 @@ void fd_cmd(char* arg){
         int id = parse_i32(first_arg(rest, &rest));
         if(fd_write(id, rest) != 0) console_puts("fd: write failed\n");
         else console_puts("fd: written\n");
+    } else if(str_eq(action, "pwrite") || str_eq(action, "write-chunk")){
+        int id = parse_i32(first_arg(rest, &rest));
+        int count = parse_i32(first_arg(rest, &rest));
+        int wrote = fd_write_chunk(id, rest, count > 0 ? (size_t)count : str_len(rest));
+        if(wrote < 0) console_puts("fd: partial write failed\n");
+        else {
+            console_puts("fd: partial wrote ");
+            console_write_dec((uint32_t)wrote);
+            console_putc('\n');
+        }
+    } else if(str_eq(action, "dup")){
+        const char* from_name = first_arg(rest, &rest);
+        int id = parse_i32(first_arg(rest, &rest));
+        const char* to_name = first_arg(rest, &rest);
+        int dup = fd_dup_to_pid(pid_for_name(from_name), id, pid_for_name(to_name));
+        if(dup < 0) console_puts("fd: dup failed\n");
+        else {
+            console_puts("fd: dup ");
+            console_write_dec((uint32_t)dup);
+            console_putc('\n');
+        }
+    } else if(str_eq(action, "inherit")){
+        const char* from_name = first_arg(rest, &rest);
+        const char* to_name = first_arg(rest, &rest);
+        int copied = fd_inherit(pid_for_name(from_name), pid_for_name(to_name));
+        if(copied < 0) console_puts("fd: inherit failed\n");
+        else {
+            console_puts("fd: inherited ");
+            console_write_dec((uint32_t)copied);
+            console_putc('\n');
+        }
     } else if(str_eq(action, "close")){
         int id = parse_i32(first_arg(rest, &rest));
         if(fd_close(id) != 0) console_puts("fd: close failed\n");
@@ -408,6 +513,6 @@ void fd_cmd(char* arg){
             console_putc('\n');
         }
     } else {
-        console_puts("usage: fd list [PROC] | all | open PATH MODE | openfor PROC PATH MODE | read FD | chunk FD | seek FD OFFSET | tell FD | write FD TEXT | close FD | closeproc PROC\n");
+        console_puts("usage: fd list [PROC] | all | open PATH MODE | openfor PROC PATH MODE | read FD | chunk FD | seek FD OFFSET | tell FD | write FD TEXT | pwrite FD COUNT TEXT | dup FROM FD TO | inherit FROM TO | close FD | closeproc PROC\n");
     }
 }

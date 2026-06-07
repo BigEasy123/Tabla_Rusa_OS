@@ -8,6 +8,7 @@ void kernel_modules_init(void){
         "shell: shell session, history, line editing, eval bridge\n"
         "editor: text editor command state\n"
         "gui: framebuffer desktop, windows, apps, input routing\n"
+        "gui-terminal: GUI terminal scrollback, input, history, clipboard, capture\n"
         "lang: Rusa parser, runtime, diagnostics, events\n"
         "fs: RAM filesystem, VFS, block, file descriptors\n"
         "process: process table, scheduler, jobs, task manager\n"
@@ -21,6 +22,7 @@ void kernel_modules_init(void){
         "math: math/physics/proof commands and compute accounting\n");
     fs_write("/system/kernel/boundaries.txt",
         "rule: new app behavior belongs in gui.c or an app module, not kmain.c\n"
+        "rule: GUI terminal state belongs in gui_terminal.c, while gui.c owns window routing\n"
         "rule: command state belongs in shell/editor/lang/taskman modules\n"
         "rule: kernel boot should initialize modules and expose descriptors\n"
         "next: migrate package and legacy shell command bodies out of kmain.c\n");

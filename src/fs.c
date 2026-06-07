@@ -18,6 +18,7 @@ struct fs_node {
     char name[FS_NAME_MAX];
     char content[FS_CONTENT_MAX];
     size_t size;
+    uint8_t permissions;
 };
 
 static struct fs_node nodes[FS_MAX_NODES];
@@ -143,6 +144,7 @@ static int create_node(const char* path, enum fs_type type){
     nodes[id].type = type;
     nodes[id].parent = parent;
     nodes[id].size = 0;
+    nodes[id].permissions = FS_PERM_READ | FS_PERM_WRITE;
     nodes[id].content[0] = 0;
     str_copy(nodes[id].name, name, FS_NAME_MAX);
     return id;
@@ -153,6 +155,7 @@ void fs_init(void){
         nodes[i].type = FS_UNUSED;
     nodes[0].type = FS_DIR;
     nodes[0].parent = 0;
+    nodes[0].permissions = FS_PERM_READ | FS_PERM_WRITE;
     nodes[0].name[0] = 0;
     cwd = 0;
     fs_mkdir("/home");
@@ -250,6 +253,8 @@ int fs_write(const char* path, const char* text){
     }
     if(nodes[id].type != FS_FILE)
         return -2;
+    if(!(nodes[id].permissions & FS_PERM_WRITE))
+        return -4;
     str_copy(nodes[id].content, text, FS_CONTENT_MAX);
     nodes[id].size = str_len(nodes[id].content);
     return 0;
@@ -264,6 +269,8 @@ int fs_append_line(const char* path, const char* text){
     }
     if(nodes[id].type != FS_FILE)
         return -2;
+    if(!(nodes[id].permissions & FS_PERM_WRITE))
+        return -4;
     size_t pos = nodes[id].size;
     for(size_t i=0; text[i] && pos + 2 < FS_CONTENT_MAX; i++)
         nodes[id].content[pos++] = text[i];
@@ -278,6 +285,8 @@ int fs_read(const char* path, const char** out){
     int id = resolve(path);
     if(id < 0 || nodes[id].type != FS_FILE)
         return -1;
+    if(!(nodes[id].permissions & FS_PERM_READ))
+        return -2;
     *out = nodes[id].content;
     return 0;
 }
@@ -310,6 +319,43 @@ int fs_stat(const char* path, int* type, size_t* size){
     if(size)
         *size = nodes[id].type == FS_FILE ? nodes[id].size : 0;
     return 0;
+}
+
+int fs_chmod(const char* path, uint8_t permissions){
+    int id = resolve(path);
+    if(id < 0)
+        return -1;
+    nodes[id].permissions = permissions & (FS_PERM_READ | FS_PERM_WRITE | FS_PERM_EXEC);
+    return 0;
+}
+
+uint8_t fs_permissions(const char* path){
+    int id = resolve(path);
+    if(id < 0)
+        return 0;
+    return nodes[id].permissions;
+}
+
+int fs_can_read(const char* path){
+    return (fs_permissions(path) & FS_PERM_READ) != 0;
+}
+
+int fs_can_write(const char* path){
+    return (fs_permissions(path) & FS_PERM_WRITE) != 0;
+}
+
+void fs_permission_string(const char* path, char* out, size_t max){
+    uint8_t p = fs_permissions(path);
+    if(max == 0)
+        return;
+    if(max < 4){
+        out[0] = 0;
+        return;
+    }
+    out[0] = (p & FS_PERM_READ) ? 'r' : '-';
+    out[1] = (p & FS_PERM_WRITE) ? 'w' : '-';
+    out[2] = (p & FS_PERM_EXEC) ? 'x' : '-';
+    out[3] = 0;
 }
 
 int fs_copy(const char* src, const char* dst){

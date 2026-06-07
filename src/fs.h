@@ -2,6 +2,11 @@
 #define FS_H
 
 #include <stddef.h>
+#include <stdint.h>
+
+#define FS_PERM_READ  1U
+#define FS_PERM_WRITE 2U
+#define FS_PERM_EXEC  4U
 
 void fs_init(void);
 int fs_mkdir(const char* path);
@@ -15,6 +20,11 @@ int fs_copy(const char* src, const char* dst);
 int fs_move(const char* src, const char* dst);
 int fs_rename(const char* path, const char* new_name);
 int fs_stat(const char* path, int* type, size_t* size);
+int fs_chmod(const char* path, uint8_t permissions);
+uint8_t fs_permissions(const char* path);
+int fs_can_read(const char* path);
+int fs_can_write(const char* path);
+void fs_permission_string(const char* path, char* out, size_t max);
 void fs_pwd(char* out, size_t max);
 void fs_ls(const char* path);
 void fs_tree(const char* path);

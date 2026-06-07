@@ -6,6 +6,7 @@
 #include "fd.h"
 #include "fs.h"
 #include "gui.h"
+#include "jobs.h"
 #include "keyboard.h"
 #include "lang.h"
 #include "loader.h"
@@ -53,6 +54,14 @@ static int text_has(const char* haystack, const char* needle){
     return 0;
 }
 
+static uint32_t sched_runner_ticks = 0;
+
+static void sched_runner_entry(const char* name, uint32_t quantum){
+    (void)name;
+    sched_runner_ticks += quantum;
+    jobs_account("runner", quantum);
+}
+
 void tests_cmd(void){
     int type;
     size_t size;
@@ -95,6 +104,27 @@ void tests_cmd(void){
                  fs_read("/tmp/fdappend.txt", &text) == 0 && text_has(text, "AB"));
     if(fd >= 0)
         fd_close(fd);
+    int partial_fd = fd_open("/tmp/fdpartial.txt", "w");
+    check_result("fd partial write setup", partial_fd >= 0 && fd_write(partial_fd, "abcdef") == 0);
+    check_result("fd partial write", partial_fd >= 0 && fd_seek(partial_fd, 2) == 0 &&
+                 fd_write_chunk(partial_fd, "XYZ", 2) == 2 &&
+                 fs_read("/tmp/fdpartial.txt", &text) == 0 && text_has(text, "abXYef"));
+    if(partial_fd >= 0)
+        fd_close(partial_fd);
+    fs_write("/tmp/fdperm.txt", "locked");
+    check_result("fs chmod read only", fs_chmod("/tmp/fdperm.txt", FS_PERM_READ) == 0 &&
+                 fs_can_read("/tmp/fdperm.txt") && !fs_can_write("/tmp/fdperm.txt") &&
+                 fd_open("/tmp/fdperm.txt", "rw") < 0);
+    int readonly_fd = fd_open("/tmp/fdperm.txt", "r");
+    check_result("fd read read-only file", readonly_fd >= 0 && fd_read(readonly_fd, &text) == 0 &&
+                 text_has(text, "locked"));
+    if(readonly_fd >= 0)
+        fd_close(readonly_fd);
+    char perm_text[8];
+    fs_permission_string("/tmp/fdperm.txt", perm_text, sizeof(perm_text));
+    check_result("fs permission string", text_has(perm_text, "r--"));
+    check_result("fs chmod restore write", fs_chmod("/tmp/fdperm.txt", FS_PERM_READ | FS_PERM_WRITE) == 0 &&
+                 fs_can_write("/tmp/fdperm.txt"));
     check_result("process compute", process_find("compute") != 0);
     char math_logic_cmd[] = "logic modus true true";
     math_cmd(math_logic_cmd);
@@ -113,7 +143,18 @@ void tests_cmd(void){
     check_result("scheduler context switch", sched_total_switches() > 0 && sched_current_name()[0] != 0);
     int worker_pid = process_create("worker", "user", "ipc-test", 44);
     check_result("process create API", worker_pid > 0 && process_find("worker") != 0);
+    fs_write("/tmp/fdinherit.txt", "inherit");
+    int inherit_fd = fd_open("/tmp/fdinherit.txt", "r");
     check_result("process spawn API", process_spawn("worker") == 0 && process_find("worker")->running);
+    check_result("fd inherit on spawn", inherit_fd >= 0 && fd_count_for_pid((uint32_t)worker_pid) > 0);
+    if(inherit_fd >= 0)
+        fd_close(inherit_fd);
+    int dup_fd = fd_open("/tmp/fdpartial.txt", "r");
+    check_result("fd duplicate to process", dup_fd >= 0 &&
+                 fd_dup_to_pid(1, dup_fd, (uint32_t)worker_pid) >= 0 &&
+                 fd_count_for_pid((uint32_t)worker_pid) > 1);
+    if(dup_fd >= 0)
+        fd_close(dup_fd);
     check_result("process priority API", process_set_priority("worker", 66) == 0 && process_find("worker")->priority == 66);
     check_result("process sleep API", process_sleep("worker") == 0 &&
                  process_find("worker")->state == PROCESS_SLEEPING);
@@ -149,6 +190,16 @@ void tests_cmd(void){
                  process_find("worker")->state == PROCESS_READY);
     check_result("scheduler priority wrapper", scheduler_set_priority("compute", 9) == 0);
     check_result("scheduler pick wrapper", scheduler_pick_next()[0] != 0);
+    sched_runner_ticks = 0;
+    check_result("scheduler register executable task",
+                 sched_register_task("runner", 3, sched_runner_entry) == 0 &&
+                 process_find("runner") != 0);
+    for(int i=0; i<10; i++)
+        sched_yield();
+    check_result("scheduler executable callback", sched_runner_ticks >= 3);
+    check_result("scheduler executable runs", sched_task_runs("runner") > 0);
+    check_result("scheduler process accounting", process_find("runner") != 0 &&
+                 process_find("runner")->ticks >= 3);
     scheduler_tick();
     check_result("process handle close", process_handle_close(proc_handle) == 0 &&
                  process_handle_get(proc_handle) == 0);

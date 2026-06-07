@@ -95,7 +95,7 @@ Resource counters are deliberately simple:
 
 ## Scheduler Wrappers
 
-The existing cooperative scheduler remains the execution driver. Compatibility APIs now expose the roadmap names:
+The cooperative scheduler remains the execution driver. Compatibility APIs now expose the roadmap names:
 
 ```c
 scheduler_init();
@@ -104,11 +104,27 @@ scheduler_pick_next();
 scheduler_set_priority("compute", 9);
 ```
 
-`sched_yield()` and timer dispatch still perform the actual cooperative task run. This keeps current boot behavior stable while providing a cleaner API surface for the GUI, tests, and future runtime work.
+## Executable Task Registration
+
+New runtime or GUI modules can register a small cooperative entry callback:
+
+```c
+static void runner(const char* name, uint32_t quantum){
+    jobs_account(name, quantum);
+}
+
+sched_register_task("runner", 3, runner);
+sched_yield();
+sched_task_runs("runner");
+```
+
+The scheduler creates or wakes the matching process row, invokes the callback when that task is selected, and accounts ticks/switches through the process table. This is not isolated process execution yet, but it is a real reusable execution hook for Rusa runtime experiments, GUI apps, and scientific jobs.
+
+`sched_yield()` and timer dispatch perform the cooperative task run. This keeps current boot behavior stable while providing a cleaner API surface for the GUI, tests, and future runtime work.
 
 ## Current Limits
 
-- Processes are still cooperative accounting records, not isolated CPU contexts.
+- Processes can now execute registered cooperative callbacks, but they are not isolated CPU contexts.
 - IPC payloads and pipe buffers are intentionally small.
 - Scheduler priority currently maps onto the cooperative quantum.
 - No memory protection or per-process address spaces exist yet.
