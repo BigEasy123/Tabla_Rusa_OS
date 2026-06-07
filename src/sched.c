@@ -315,3 +315,25 @@ void sched_cmd(char* arg){
         console_puts("usage: sched list | yield | run N | wake NAME | sleep NAME [TICKS] | block NAME | quantum NAME N | trace NAME\n");
     }
 }
+
+void scheduler_init(void){
+    sched_init();
+}
+
+void scheduler_tick(void){
+    sched_on_timer();
+}
+
+const char* scheduler_pick_next(void){
+    sched_yield();
+    return sched_current_name();
+}
+
+int scheduler_set_priority(const char* name, uint32_t priority){
+    struct sched_task* task = find_task(name);
+    if(!task)
+        return -1;
+    task->quantum = priority ? priority : 1;
+    process_set_priority(name, priority);
+    return 0;
+}

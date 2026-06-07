@@ -23,6 +23,10 @@ crystal_create_lattice("silicon", "cubic", 5431, 5431, 5431, 90000, 90000, 90000
 simulation_job_create("raman", "peak-fit", 91);
 simulation_job_run(job_id);
 simulation_job_status(job_id, &job);
+quantum_state_create("particle-box", "n=1", 1000, "first scaffold state");
+material_register("silicon", "Si", "solid", 1120);
+band_point_add(material_id, "G", 0, 0);
+phonon_mode_add(material_id, "T2g", 520000, "raman");
 ```
 
 Values are fixed-point where useful, generally scaled by 1000. This avoids depending on a floating-point runtime inside the freestanding kernel.
@@ -37,6 +41,9 @@ Values are fixed-point where useful, generally scaled by 1000. This avoids depen
 - Raman/IR spectroscopy peak records.
 - Crystal lattice records.
 - Simulation job records tied into process/job accounting.
+- Quantum state records with basis/energy metadata.
+- Materials records with formula, phase, and band-gap metadata.
+- Band point and phonon mode records for solid-state scaffolding.
 
 ## Terminal Commands
 
@@ -50,6 +57,10 @@ science peaks
 science sim new raman peak-fit
 science sim run 1
 science sim
+science quantum
+science materials
+science bands
+science phonons
 ```
 
 ## Integration
@@ -61,5 +72,5 @@ Science simulation runs account work to the shared job table and update the `com
 - Real FFT, nonlinear fitting, and uncertainty propagation.
 - Real units algebra for compound units such as `m/s^2`.
 - ODE/PDE solver scaffolds.
-- Quantum, thermodynamics, solid-state, crystallography, Raman/IR analysis objects.
+- Real quantum solvers, thermodynamics models, band-structure calculations, and phonon calculations.
 - Plot/export hooks and notebook cell execution.

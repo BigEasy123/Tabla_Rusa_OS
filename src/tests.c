@@ -9,6 +9,7 @@
 #include "keyboard.h"
 #include "lang.h"
 #include "loader.h"
+#include "mathcore.h"
 #include "mathlib.h"
 #include "memory.h"
 #include "mouse.h"
@@ -17,6 +18,7 @@
 #include "paging.h"
 #include "policy.h"
 #include "privacy.h"
+#include "proofcore.h"
 #include "process.h"
 #include "project.h"
 #include "research.h"
@@ -80,8 +82,19 @@ void tests_cmd(void){
     check_result("fd open", fd >= 0);
     check_result("fd write", fd >= 0 && fd_write(fd, "fd-ok") == 0);
     check_result("fd read", fd >= 0 && fd_read(fd, &text) == 0 && text[0] == 'f');
+    check_result("fd seek/tell", fd >= 0 && fd_seek(fd, 3) == 0 && fd_tell(fd) == 3);
+    char fd_chunk[8];
+    check_result("fd read chunk", fd >= 0 && fd_read_chunk(fd, fd_chunk, sizeof(fd_chunk)) > 0 &&
+                 text_has(fd_chunk, "ok"));
     check_result("fd per-process count", fd_count_for_pid(1) > 0);
     check_result("fd close", fd >= 0 && fd_close(fd) == 0);
+    fd = fd_open("/tmp/fdappend.txt", "a");
+    check_result("fd append open", fd >= 0);
+    check_result("fd append first", fd >= 0 && fd_write(fd, "A") == 0);
+    check_result("fd append second", fd >= 0 && fd_write(fd, "B") == 0 &&
+                 fs_read("/tmp/fdappend.txt", &text) == 0 && text_has(text, "AB"));
+    if(fd >= 0)
+        fd_close(fd);
     check_result("process compute", process_find("compute") != 0);
     char math_logic_cmd[] = "logic modus true true";
     math_cmd(math_logic_cmd);
@@ -98,6 +111,48 @@ void tests_cmd(void){
     sched_yield();
     check_result("scheduler yield", 1);
     check_result("scheduler context switch", sched_total_switches() > 0 && sched_current_name()[0] != 0);
+    int worker_pid = process_create("worker", "user", "ipc-test", 44);
+    check_result("process create API", worker_pid > 0 && process_find("worker") != 0);
+    check_result("process spawn API", process_spawn("worker") == 0 && process_find("worker")->running);
+    check_result("process priority API", process_set_priority("worker", 66) == 0 && process_find("worker")->priority == 66);
+    check_result("process sleep API", process_sleep("worker") == 0 &&
+                 process_find("worker")->state == PROCESS_SLEEPING);
+    check_result("process wake API", process_wake("worker") == 0 &&
+                 process_find("worker")->state == PROCESS_READY);
+    struct process_info proc_snapshot[PROCESS_MAX];
+    check_result("process structured list", process_list_info(proc_snapshot, PROCESS_MAX) >= 6);
+    check_result("process current API", process_get_current() != 0 && process_get_current()->name[0] != 0);
+    check_result("process memory API", process_set_memory("worker", 123) == 0 &&
+                 process_find("worker")->memory_kib == 123 && process_memory_total_kib() >= 123);
+    check_result("process background API", process_set_background("worker", 1) == 0 &&
+                 process_find("worker")->background);
+    int proc_handle = process_handle_open(1, "worker");
+    struct process_handle_info handle_snapshot[PROCESS_MAX];
+    check_result("process handle open", proc_handle > 0 &&
+                 process_handle_get(proc_handle) != 0 &&
+                 text_has(process_handle_get(proc_handle)->name, "worker"));
+    check_result("process handle list", process_handle_list(handle_snapshot, PROCESS_MAX) > 0);
+    check_result("process handle count", process_handles_for_pid(1) > 0);
+    struct ipc_message_info ipc_msg;
+    check_result("ipc send API", ipc_send(1, (uint32_t)worker_pid, "hello-worker") == 0);
+    check_result("ipc recv API", ipc_recv((uint32_t)worker_pid, &ipc_msg) == 0 &&
+                 text_has(ipc_msg.payload, "hello-worker"));
+    int pipe_id = pipe_create((uint32_t)worker_pid);
+    char pipe_buffer[32];
+    check_result("pipe create API", pipe_id > 0);
+    check_result("pipe write API", pipe_id > 0 && pipe_write((uint32_t)pipe_id, "pipe-ok") == 0);
+    check_result("pipe read API", pipe_id > 0 && pipe_read((uint32_t)pipe_id, pipe_buffer, sizeof(pipe_buffer)) == 0 &&
+                 text_has(pipe_buffer, "pipe-ok"));
+    check_result("signal sleep API", signal_send((uint32_t)worker_pid, "sleep") == 0 &&
+                 process_find("worker")->state == PROCESS_SLEEPING);
+    check_result("signal wake API", signal_send((uint32_t)worker_pid, "wake") == 0 &&
+                 process_find("worker")->state == PROCESS_READY);
+    check_result("scheduler priority wrapper", scheduler_set_priority("compute", 9) == 0);
+    check_result("scheduler pick wrapper", scheduler_pick_next()[0] != 0);
+    scheduler_tick();
+    check_result("process handle close", process_handle_close(proc_handle) == 0 &&
+                 process_handle_get(proc_handle) == 0);
+    check_result("process kill API", process_kill("worker") == 0 && process_find("worker") == 0);
     fb_cmd("status");
     check_result("framebuffer descriptor", fs_stat("/system/gui/framebuffer.txt", &type, &size) == 0);
     check_result("hardware framebuffer", fb_hardware_ready());
@@ -217,6 +272,15 @@ void tests_cmd(void){
     gui_handle_key('x');
     gui_terminal_input_text(gui_cmd_buf, sizeof(gui_cmd_buf));
     check_result("gui terminal cursor editing", text_has(gui_cmd_buf, "pxd"));
+    gui_terminal_clear_input();
+    char gui_terminal_select[] = "terminal select 0";
+    gui_cmd(gui_terminal_select);
+    char gui_terminal_copy[] = "terminal copy";
+    gui_cmd(gui_terminal_copy);
+    char gui_terminal_paste[] = "terminal paste";
+    gui_cmd(gui_terminal_paste);
+    gui_terminal_input_text(gui_cmd_buf, sizeof(gui_cmd_buf));
+    check_result("gui terminal copy paste", text_has(gui_cmd_buf, "Tabla") || text_has(gui_cmd_buf, "$"));
     gui_terminal_clear_input();
     char gui_editor_code[] = "editor code";
     gui_cmd(gui_editor_code);
@@ -523,6 +587,37 @@ void tests_cmd(void){
     gui_cmd(gui_security_firewall);
     gui_active_terminal_command(gui_cmd_buf, sizeof(gui_cmd_buf));
     check_result("gui security firewall bridge", text_has(gui_cmd_buf, "firewall list"));
+    privacy_set_master(1);
+    privacy_set_network(1);
+    char gui_settings_privacy[] = "settings privacy";
+    gui_cmd(gui_settings_privacy);
+    check_result("gui settings privacy tab", privacy_master_enabled() && privacy_network_enabled());
+    char gui_settings_master[] = "settings master";
+    gui_cmd(gui_settings_master);
+    check_result("gui settings master toggle", !privacy_master_enabled() && !privacy_allows_network());
+    char gui_settings_master_on[] = "settings master";
+    gui_cmd(gui_settings_master_on);
+    char gui_settings_network[] = "settings network";
+    gui_cmd(gui_settings_network);
+    check_result("gui settings network toggle", privacy_master_enabled() && privacy_network_enabled());
+    char gui_settings_network_off[] = "settings network";
+    gui_cmd(gui_settings_network_off);
+    char gui_settings_cookies[] = "settings cookies";
+    gui_cmd(gui_settings_cookies);
+    check_result("gui settings cookie toggle", text_has(privacy_cookie_policy(), "block"));
+    char gui_settings_devices[] = "settings devices";
+    gui_cmd(gui_settings_devices);
+    check_result("gui settings devices toggle", !privacy_devices_enabled());
+    char gui_settings_devices_on[] = "settings devices";
+    gui_cmd(gui_settings_devices_on);
+    char gui_settings_telemetry[] = "settings telemetry";
+    gui_cmd(gui_settings_telemetry);
+    check_result("gui settings telemetry toggle", privacy_telemetry_enabled());
+    char gui_settings_telemetry_off[] = "settings telemetry";
+    gui_cmd(gui_settings_telemetry_off);
+    privacy_set_master(1);
+    privacy_set_network(1);
+    privacy_set_cookie_policy("ask");
     char gui_net_app[] = "app net";
     gui_cmd(gui_net_app);
     char gui_net_open[] = "network open";
@@ -548,6 +643,39 @@ void tests_cmd(void){
     check_result("research dataset add", research_register_dataset((uint32_t)research_id, "samples", "/research/datasets/samples.csv", "x:int,y:int") > 0);
     check_result("research experiment add", research_track_experiment((uint32_t)research_id, "trial", "math vector dot") > 0);
     check_result("research result add", research_record_result((uint32_t)research_id, "trial", "ok") > 0);
+    check_result("research add dataset alias", research_add_dataset((uint32_t)research_id, "alias-data",
+                 "/research/datasets/alias.csv", "v:int") > 0);
+    check_result("research citation add", research_add_citation((uint32_t)research_id, "selftest2026",
+                 "Selftest Citation", "Tabla Rusa local") > 0);
+    check_result("research result alias", research_add_result((uint32_t)research_id, "trial2", "ok2") > 0);
+    int task_id = research_add_task((uint32_t)research_id, "write-methods", "benji");
+    check_result("research task add", task_id > 0);
+    check_result("research task update", research_update_task((uint32_t)task_id, "done") == 0);
+    check_result("research timeline add", research_add_timeline((uint32_t)research_id, "milestone", "tests passed") > 0);
+    check_result("research graph relation", research_add_relation((uint32_t)research_id, "Rusa", "supports", "notebooks") > 0);
+    int nb_id = notebook_create((uint32_t)research_id, "selftest-notebook");
+    check_result("research notebook create", nb_id > 0);
+    int nb_cell = notebook_add_cell((uint32_t)nb_id, RESEARCH_CELL_MATH, "calc", "math vec dot");
+    check_result("research notebook add cell", nb_cell > 0);
+    char nb_run[96];
+    check_result("research notebook run cell", notebook_run_cell((uint32_t)nb_id, (uint32_t)nb_cell, nb_run, sizeof(nb_run)) == 0 &&
+                 text_has(nb_run, "calc"));
+    char export_path[80];
+    check_result("research notebook export", notebook_export((uint32_t)nb_id, export_path, sizeof(export_path)) == 0 &&
+                 fs_stat(export_path, &type, &size) == 0);
+    check_result("research latex export", research_export_latex((uint32_t)research_id, export_path, sizeof(export_path)) == 0 &&
+                 fs_stat(export_path, &type, &size) == 0);
+    struct research_citation_info citation_info[4];
+    check_result("research citation table", research_citation_list((uint32_t)research_id, citation_info, 4) > 0);
+    struct research_notebook_info notebook_info[4];
+    check_result("research notebook table", notebook_list((uint32_t)research_id, notebook_info, 4) > 0);
+    struct research_task_info task_info[4];
+    check_result("research task table", research_task_list((uint32_t)research_id, task_info, 4) > 0 &&
+                 text_has(task_info[0].status, "done"));
+    struct research_timeline_info timeline_info[4];
+    check_result("research timeline table", research_timeline_list((uint32_t)research_id, timeline_info, 4) > 0);
+    struct research_relation_info relation_info[4];
+    check_result("research graph table", research_relation_list((uint32_t)research_id, relation_info, 4) > 0);
     struct research_project_info research_projects[4];
     check_result("research project table", research_project_list(research_projects, 4) > 0);
     struct research_cell_info research_cells[4];
@@ -587,7 +715,59 @@ void tests_cmd(void){
     check_result("science simulation job", sim_id > 0 && simulation_job_run((uint32_t)sim_id) == 0 &&
                  simulation_job_status((uint32_t)sim_id, &sim_info) == 0 && text_has(sim_info.status, "complete"));
     check_result("science simulation table", simulation_job_list(&sim_info, 1) > 0);
+    int q_id = quantum_state_create("selftest-state", "spin-up", 1250, "test quantum record");
+    struct quantum_state_info q_info;
+    check_result("science quantum state", q_id > 0 && quantum_state_get((uint32_t)q_id, &q_info) == 0 &&
+                 text_has(q_info.basis, "spin"));
+    int material_id = material_register("selftest-material", "AB", "solid", 2500);
+    struct material_info material;
+    check_result("science material record", material_id > 0 && material_get((uint32_t)material_id, &material) == 0 &&
+                 material.band_gap_scaled == 2500);
+    check_result("science band point", band_point_add((uint32_t)material_id, "G", 0, 2500) > 0 &&
+                 band_point_list((uint32_t)material_id, 0, 0) > 0);
+    check_result("science phonon mode", phonon_mode_add((uint32_t)material_id, "A1g", 123000, "raman") > 0 &&
+                 phonon_mode_list((uint32_t)material_id, 0, 0) > 0);
     check_result("science array free", array_free((uint32_t)science_array) == 0);
+    struct math_plugin_info plugin_info[12];
+    check_result("math plugin registry", math_plugin_list(plugin_info, 12) >= 10);
+    struct math_plugin_info logic_plugin;
+    check_result("math plugin find", math_plugin_find("logic-proof", &logic_plugin) == 0 &&
+                 text_has(logic_plugin.capabilities, "proof"));
+    char plugin_out[96];
+    check_result("math plugin dispatch", math_plugin_dispatch("physics", "status", plugin_out, sizeof(plugin_out)) == 0 &&
+                 text_has(plugin_out, "physics"));
+    int theorem_id = math_plugin_register_theorem("linear-algebra", "Selftest theorem", "linear algebra",
+                                                  "A test theorem is stated but not checked.", THEOREM_FORMALLY_CHECKED);
+    struct theorem_info theorem_list[16];
+    uint32_t theorem_count = math_theorem_list(theorem_list, 16);
+    check_result("math theorem registry", theorem_id > 0 && theorem_count > 0);
+    check_result("math theorem status guard", theorem_list[theorem_count - 1].status != THEOREM_FORMALLY_CHECKED);
+    check_result("math algorithm registry", math_plugin_register_algorithm("numerical", "Selftest algorithm", "testing",
+                 "input", "output", "O(1)", "registered") > 0 && math_algorithm_list(0, 0) > 0);
+    check_result("math object type registry", math_plugin_register_object_type("logic-proof", "SelftestObject",
+                 "display", "latex") > 0 && math_object_type_list(0, 0) > 0);
+    check_result("math plugin selftest hook", math_plugin_run_tests("logic-proof") == 0);
+    int proof_id = proof_create("selftest-proof", "Q", PROOF_MODE_GUIDED);
+    check_result("proof create", proof_id > 0);
+    check_result("proof add assumption", proof_add_assumption((uint32_t)proof_id, "P") == 0);
+    check_result("proof invalid exact", proof_add_step((uint32_t)proof_id, "exact", "R") > 0);
+    struct proof_step_info proof_steps[8];
+    uint32_t proof_step_count = proof_list_steps((uint32_t)proof_id, proof_steps, 8);
+    check_result("proof invalid status", proof_step_count > 0 &&
+                 proof_steps[proof_step_count - 1].status == PROOF_STEP_INVALID);
+    check_result("proof valid assumption exact", proof_add_step((uint32_t)proof_id, "exact", "P") > 0);
+    proof_step_count = proof_list_steps((uint32_t)proof_id, proof_steps, 8);
+    check_result("proof valid status", proof_steps[proof_step_count - 1].status == PROOF_STEP_VALID);
+    int proof2 = proof_create("goal-proof", "Goal and Subgoal", PROOF_MODE_GUIDED);
+    check_result("proof split incomplete", proof2 > 0 && proof_add_step((uint32_t)proof2, "split", "Goal") > 0);
+    struct proof_state_info proof_state;
+    check_result("proof state info", proof_get_state((uint32_t)proof2, &proof_state) == 0 &&
+                 proof_state.status == PROOF_STEP_INCOMPLETE);
+    check_result("proof list states", proof_list_states(&proof_state, 1) > 0);
+    char proof_export[512];
+    check_result("proof export", proof_export_text((uint32_t)proof_id, proof_export, sizeof(proof_export)) == 0 &&
+                 text_has(proof_export, "selftest-proof"));
+    check_result("proof replay detects invalid", proof_replay((uint32_t)proof_id) != 0);
     char net_socket_cmd[] = "socket udp 9999";
     char net_send_cmd[] = "send 0 selftest-packet";
     net_cmd(net_socket_cmd);

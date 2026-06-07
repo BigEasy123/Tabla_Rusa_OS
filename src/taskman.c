@@ -48,6 +48,9 @@ void taskman_cmd(char* arg){
         console_puts("TASK MANAGER\n");
         console_puts("processes:\n");
         process_list();
+        console_puts("memory total KiB=");
+        console_write_dec(process_memory_total_kib());
+        console_putc('\n');
         console_puts("fds:\n");
         char all[] = "all";
         fd_cmd(all);
@@ -56,6 +59,25 @@ void taskman_cmd(char* arg){
         jobs_cmd(list);
     } else if(str_eq(action, "ps")){
         process_list();
+    } else if(str_eq(action, "resources")){
+        struct process_info snapshot[PROCESS_MAX];
+        uint32_t count = process_list_info(snapshot, PROCESS_MAX);
+        console_puts("process resources total_mem=");
+        console_write_dec(process_memory_total_kib());
+        console_puts("KiB\n");
+        for(uint32_t i=0; i<count; i++){
+            console_puts(snapshot[i].name);
+            console_puts(" state=");
+            console_puts(process_state_name(snapshot[i].state));
+            console_puts(" parent=");
+            console_write_dec(snapshot[i].parent_pid);
+            console_puts(" mem=");
+            console_write_dec(snapshot[i].memory_kib);
+            console_puts("KiB handles=");
+            console_write_dec(snapshot[i].handle_count);
+            console_puts(snapshot[i].background ? " bg" : " fg");
+            console_putc('\n');
+        }
     } else if(str_eq(action, "jobs")){
         char list[] = "list";
         jobs_cmd(list);
@@ -80,6 +102,6 @@ void taskman_cmd(char* arg){
         jobs_account("math-worker", 4);
         console_puts("taskman: compute process boosted priority=99\n");
     } else {
-        console_puts("usage: taskman top | ps | jobs | fds | services | kill NAME | boost\n");
+        console_puts("usage: taskman top | ps | resources | jobs | fds | services | kill NAME | boost\n");
     }
 }

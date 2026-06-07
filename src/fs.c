@@ -2,7 +2,7 @@
 #include "console.h"
 #include <stdint.h>
 
-#define FS_MAX_NODES 128
+#define FS_MAX_NODES 192
 #define FS_NAME_MAX 32
 #define FS_CONTENT_MAX 1024
 

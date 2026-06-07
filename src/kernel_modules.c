@@ -16,6 +16,8 @@ void kernel_modules_init(void){
         "policy: firewall rules and protected-resource checks\n"
         "research: projects, notebooks, datasets, experiments, results\n"
         "science: units, constants, arrays, fitting, signal, spectroscopy, crystals, simulations\n"
+        "mathcore: plugin, theorem, algorithm, and math object-type registries\n"
+        "proofcore: proof states, assumptions, proof steps, replay, explanations, export\n"
         "math: math/physics/proof commands and compute accounting\n");
     fs_write("/system/kernel/boundaries.txt",
         "rule: new app behavior belongs in gui.c or an app module, not kmain.c\n"

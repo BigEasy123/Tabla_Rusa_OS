@@ -86,6 +86,10 @@ static int terminal_focused = 0;
 static char terminal_history[8][96];
 static uint32_t terminal_history_count = 0;
 static int terminal_history_view = -1;
+static char terminal_clipboard[256] = "";
+static uint32_t terminal_sel_start = 0;
+static uint32_t terminal_sel_end = 0;
+static int terminal_selection = 0;
 static uint32_t gui_win_x = 174;
 static uint32_t gui_win_y = 72;
 static uint32_t gui_win_w = 820;
@@ -630,6 +634,61 @@ static uint32_t terminal_add_capture(const char* text){
         count++;
     }
     return count;
+}
+
+static uint32_t terminal_sel_lo(void){
+    return terminal_sel_start < terminal_sel_end ? terminal_sel_start : terminal_sel_end;
+}
+
+static uint32_t terminal_sel_hi(void){
+    return terminal_sel_start < terminal_sel_end ? terminal_sel_end : terminal_sel_start;
+}
+
+static int terminal_line_selected(uint32_t line){
+    return terminal_selection && line >= terminal_sel_lo() && line <= terminal_sel_hi();
+}
+
+static void terminal_insert_char(char c);
+
+static void terminal_select_range(uint32_t start, uint32_t end){
+    if(terminal_count == 0){
+        terminal_selection = 0;
+        return;
+    }
+    if(start >= terminal_count) start = terminal_count - 1;
+    if(end >= terminal_count) end = terminal_count - 1;
+    terminal_sel_start = start;
+    terminal_sel_end = end;
+    terminal_selection = 1;
+    if(terminal_sel_lo() < terminal_top)
+        terminal_top = terminal_sel_lo();
+    if(terminal_sel_hi() >= terminal_top + 8)
+        terminal_top = terminal_sel_hi() - 7;
+}
+
+static void terminal_copy_selection(void){
+    uint32_t pos = 0;
+    terminal_clipboard[0] = 0;
+    if(!terminal_selection || terminal_count == 0)
+        return;
+    for(uint32_t row=terminal_sel_lo(); row<=terminal_sel_hi() && row<terminal_count; row++){
+        for(uint32_t col=0; terminal_lines[row][col] && pos + 1 < sizeof(terminal_clipboard); col++)
+            terminal_clipboard[pos++] = terminal_lines[row][col];
+        if(pos + 1 < sizeof(terminal_clipboard))
+            terminal_clipboard[pos++] = '\n';
+    }
+    terminal_clipboard[pos] = 0;
+}
+
+static void terminal_paste_clipboard(void){
+    uint32_t len = text_len32(terminal_input);
+    for(uint32_t i=0; terminal_clipboard[i] && len + 1 < sizeof(terminal_input); i++){
+        char c = terminal_clipboard[i];
+        if(c == '\n' || c == '\r')
+            c = ' ';
+        terminal_insert_char(c);
+        len = text_len32(terminal_input);
+    }
 }
 
 static void terminal_seed(void){
@@ -1818,8 +1877,12 @@ static void draw_terminal_surface(void){
     app_draw_text(244, 226, "GUI Terminal", 0x8EE8A0);
     uint32_t visible = terminal_count - terminal_top;
     if(visible > 8) visible = 8;
-    for(uint32_t i=0; i<visible; i++)
-        app_draw_text(250, 268 + i * 24, terminal_lines[terminal_top + i], 0xFFFFFF);
+    for(uint32_t i=0; i<visible; i++){
+        uint32_t row = terminal_top + i;
+        if(terminal_line_selected(row))
+            app_fill_rect(244, 252 + i * 24, 660, 20, 0x294058);
+        app_draw_text(250, 268 + i * 24, terminal_lines[row], terminal_line_selected(row) ? 0x8EE8A0 : 0xFFFFFF);
+    }
     copy_text(prompt, "tr:gui $ ", sizeof(prompt));
     append_text(prompt, terminal_input, sizeof(prompt));
     app_fill_rect(244, 502, 660, 32, terminal_focused ? 0x213040 : 0x18222C);
@@ -1829,7 +1892,7 @@ static void draw_terminal_surface(void){
         if(cx > 894) cx = 894;
         app_fill_rect(cx, 522, 2, 9, 0x8EE8A0);
     }
-    app_draw_text(250, 548, "Click input area, type command, Enter runs in place. Open Terminal switches full-screen.", 0xCFE8FF);
+    app_draw_text(250, 548, terminal_clipboard[0] ? "select/copy/paste available. Clipboard has terminal text." : "Click input area, type command, Enter runs in place.", 0xCFE8FF);
 }
 
 struct gui_render_context {
@@ -1992,7 +2055,7 @@ static void draw_active_app_detail(void){
     } else if(active_is("taskman")){
         const struct process_info* selected = process_find(taskman_selected);
         const struct window_info* focused = window_focused();
-        draw_app_line(1, "Processes", "pid state priority ticks workload window");
+        draw_app_line(1, "Processes", "pid state priority ticks memory handles window");
         copy_text(line, selected ? selected->name : "none", sizeof(line));
         append_text(line, " -> ", sizeof(line));
         append_text(line, selected ? taskman_app_for_process(selected->name) : "none", sizeof(line));
@@ -2009,12 +2072,20 @@ static void draw_active_app_detail(void){
             if(!proc)
                 continue;
             copy_text(row, proc->name, sizeof(row));
-            append_text(row, proc->running ? " run " : " stop ", sizeof(row));
+            append_text(row, proc->running ? " " : " stopped ", sizeof(row));
+            append_text(row, process_state_name(proc->state), sizeof(row));
+            append_text(row, " ", sizeof(row));
             append_text(row, "p=", sizeof(row));
             u32_text(proc->priority, num, sizeof(num));
             append_text(row, num, sizeof(row));
             append_text(row, " ticks=", sizeof(row));
             u32_text(proc->ticks, num, sizeof(num));
+            append_text(row, num, sizeof(row));
+            append_text(row, " mem=", sizeof(row));
+            u32_text(proc->memory_kib, num, sizeof(num));
+            append_text(row, num, sizeof(row));
+            append_text(row, "K h=", sizeof(row));
+            u32_text(process_handles_for_pid(proc->pid), num, sizeof(num));
             append_text(row, num, sizeof(row));
             append_text(row, " win=", sizeof(row));
             append_text(row, taskman_app_for_process(proc->name), sizeof(row));
@@ -2118,16 +2189,19 @@ static void draw_active_app_detail(void){
             draw_button(466, 312, 96, "Fast", 0x4F7088);
             draw_button(586, 312, 96, "Mouse", 0x345A7A);
         } else {
-            copy_text(line, privacy_allows_network() ? "network on cookies " : "network off cookies ", sizeof(line));
+            copy_text(line, privacy_master_enabled() ? "master on " : "master off ", sizeof(line));
+            append_text(line, privacy_network_enabled() ? "network on " : "network off ", sizeof(line));
+            append_text(line, "cookies ", sizeof(line));
             append_text(line, privacy_cookie_policy(), sizeof(line));
             draw_app_line(2, "Master", line);
-            copy_text(line, "cursor ", sizeof(line));
-            append_text(line, fb_cursor_style(), sizeof(line));
-            append_text(line, "  use: gui cursor dot", sizeof(line));
-            draw_app_line(3, "Pointer", line);
-            draw_button(226, 312, 96, "Security", 0x884C4C);
-            draw_button(346, 312, 96, "Events", 0x725C9A);
-            draw_button(466, 312, 96, "Storage", 0x345A7A);
+            copy_text(line, privacy_devices_enabled() ? "devices on " : "devices off ", sizeof(line));
+            append_text(line, privacy_telemetry_enabled() ? "telemetry on" : "telemetry off", sizeof(line));
+            draw_app_line(3, "Access", line);
+            draw_button(226, 312, 96, "Master", 0x884C4C);
+            draw_button(346, 312, 96, "Network", 0x345A7A);
+            draw_button(466, 312, 96, "Cookies", 0x725C9A);
+            draw_button(586, 312, 96, "Devices", 0x3C704C);
+            draw_button(706, 312, 96, "Telemetry", 0x4F7088);
         }
     } else if(active_is("network")){
         u32_text(net_packet_count(), num, sizeof(num));
@@ -2570,6 +2644,38 @@ void gui_cmd(char* arg){
         name = canonical_app(name);
         gui_focus_app(name);
         gui_draw_desktop();
+    } else if(str_eq(action, "terminal") || str_eq(action, "term")){
+        const char* sub = first_arg(rest, &rest);
+        if(str_eq(sub, "select")){
+            const char* a_arg = first_arg(rest, &rest);
+            const char* b_arg = first_arg(rest, &rest);
+            uint32_t a = parse_u32(a_arg);
+            uint32_t b = b_arg[0] ? parse_u32(b_arg) : a;
+            terminal_select_range(a, b);
+            copy_text(launch_notice, "terminal lines selected", sizeof(launch_notice));
+            console_puts("gui terminal: selected lines\n");
+        } else if(str_eq(sub, "copy")){
+            terminal_copy_selection();
+            copy_text(launch_notice, terminal_clipboard[0] ? "terminal copied" : "terminal copy empty", sizeof(launch_notice));
+            console_puts(terminal_clipboard[0] ? "gui terminal: copied\n" : "gui terminal: nothing selected\n");
+        } else if(str_eq(sub, "paste")){
+            terminal_paste_clipboard();
+            terminal_focused = 1;
+            copy_text(launch_notice, "terminal pasted", sizeof(launch_notice));
+            console_puts("gui terminal: pasted\n");
+        } else if(str_eq(sub, "clear")){
+            terminal_count = 0;
+            terminal_top = 0;
+            terminal_selection = 0;
+            terminal_clipboard[0] = 0;
+            terminal_seed();
+            console_puts("gui terminal: cleared\n");
+        } else {
+            console_puts("usage: gui terminal select A [B] | copy | paste | clear\n");
+            return;
+        }
+        gui_focus_app("terminal");
+        gui_draw_desktop();
     } else if(str_eq(action, "cursor") || str_eq(action, "pointer")){
         const char* style = first_arg(rest, &rest);
         if(style[0] == 0){
@@ -2924,16 +3030,40 @@ void gui_cmd(char* arg){
         }
     } else if(str_eq(action, "settings")){
         const char* tab = first_arg(rest, &rest);
+        launch_notice[0] = 0;
         if(str_eq(tab, "privacy")) settings_tab = 0;
         else if(str_eq(tab, "hardware")) settings_tab = 1;
         else if(str_eq(tab, "keyboard")) settings_tab = 2;
         else if(str_eq(tab, "display") || str_eq(tab, "gpu")) settings_tab = 3;
         else if(str_eq(tab, "input") || str_eq(tab, "mouse")) settings_tab = 4;
+        else if(str_eq(tab, "master")){
+            privacy_set_master(!privacy_master_enabled());
+            settings_tab = 0;
+            copy_text(launch_notice, privacy_master_enabled() ? "master privacy on" : "master privacy off", sizeof(launch_notice));
+        } else if(str_eq(tab, "network")){
+            privacy_set_network(!privacy_network_enabled());
+            settings_tab = 0;
+            copy_text(launch_notice, privacy_network_enabled() ? "network allowed" : "network disconnected", sizeof(launch_notice));
+        } else if(str_eq(tab, "cookies")){
+            const char* policy = privacy_cookie_policy();
+            privacy_set_cookie_policy(str_eq(policy, "ask") ? "block" : (str_eq(policy, "block") ? "allow" : "ask"));
+            settings_tab = 0;
+            copy_text(launch_notice, "cookie policy changed", sizeof(launch_notice));
+        } else if(str_eq(tab, "devices")){
+            privacy_set_devices(!privacy_devices_enabled());
+            settings_tab = 0;
+            copy_text(launch_notice, privacy_devices_enabled() ? "devices allowed" : "devices blocked", sizeof(launch_notice));
+        } else if(str_eq(tab, "telemetry")){
+            privacy_set_telemetry(!privacy_telemetry_enabled());
+            settings_tab = 0;
+            copy_text(launch_notice, privacy_telemetry_enabled() ? "telemetry allowed" : "telemetry off", sizeof(launch_notice));
+        }
         else if(tab[0]){
-            console_puts("usage: gui settings privacy|hardware|keyboard|display|input\n");
+            console_puts("usage: gui settings privacy|hardware|keyboard|display|input|master|network|cookies|devices|telemetry\n");
             return;
         }
-        copy_text(launch_notice, "settings tab changed", sizeof(launch_notice));
+        if(!launch_notice[0])
+            copy_text(launch_notice, "settings tab changed", sizeof(launch_notice));
         gui_focus_app("privacy");
         gui_draw_desktop();
     } else if(str_eq(action, "close")){
@@ -3658,11 +3788,25 @@ void gui_handle_click(uint32_t x, uint32_t y){
         else if(sx < 648) settings_tab = 3;
         else settings_tab = 4;
         copy_text(launch_notice, "settings tab changed", sizeof(launch_notice));
-    } else if(active_is("privacy") && app_is_open("privacy") && sy >= 312 && sy < 340 && sx >= 226 && sx < 682){
+    } else if(active_is("privacy") && app_is_open("privacy") && sy >= 312 && sy < 340 && sx >= 226 && sx < 812){
         if(settings_tab == 0){
-            if(sx < 322) gui_open_app("security");
-            else if(sx < 442) gui_open_app("events");
-            else gui_open_app("storage");
+            if(sx < 322){
+                privacy_set_master(!privacy_master_enabled());
+                copy_text(launch_notice, privacy_master_enabled() ? "master privacy on" : "master privacy off", sizeof(launch_notice));
+            } else if(sx < 442){
+                privacy_set_network(!privacy_network_enabled());
+                copy_text(launch_notice, privacy_network_enabled() ? "network allowed" : "network disconnected", sizeof(launch_notice));
+            } else if(sx < 562){
+                const char* policy = privacy_cookie_policy();
+                privacy_set_cookie_policy(str_eq(policy, "ask") ? "block" : (str_eq(policy, "block") ? "allow" : "ask"));
+                copy_text(launch_notice, "cookie policy changed", sizeof(launch_notice));
+            } else if(sx < 682){
+                privacy_set_devices(!privacy_devices_enabled());
+                copy_text(launch_notice, privacy_devices_enabled() ? "devices allowed" : "devices blocked", sizeof(launch_notice));
+            } else {
+                privacy_set_telemetry(!privacy_telemetry_enabled());
+                copy_text(launch_notice, privacy_telemetry_enabled() ? "telemetry allowed" : "telemetry off", sizeof(launch_notice));
+            }
         } else if(settings_tab == 1){
             if(sx < 338) request_terminal_command("hardware cpu", "cpu info");
             else if(sx < 468) request_terminal_command("hardware gpu", "gpu info");

@@ -2,7 +2,7 @@
 
 This file is the living feature ledger for Tabla Rusa OS. Update it after each development prompt.
 
-Last updated: after modular networking/security expansion, research framework APIs, Rusa runtime API scaffolding, and the science engine module.
+Last updated: after modular networking/security expansion, research APIs, Rusa runtime APIs, science engine, MathCore plugin registry, and ProofCore proof states.
 
 ## Current Kernel Shape
 
@@ -11,7 +11,7 @@ Last updated: after modular networking/security expansion, research framework AP
 - Boot includes ASCII intro, a full-stack autostart path, and `/home`, `/system`, `/proc`, `/pkg`, `/dev`, `/var/log`, `/share/docs`, and `/home/math`.
 - Boot writes `/system/kernel/modules.txt` and `/system/kernel/boundaries.txt` from `kernel_modules.c`, making subsystem ownership and future cleanup targets inspectable.
 - Kernel cleanup now has an explicit boundary descriptor for shell, editor, GUI, Rusa, FS, process, net, security, and math ownership.
-- Repository docs now include `docs/ARCHITECTURE.md`, `docs/RUSA.md`, `docs/RUSA_RUNTIME.md`, `docs/GUI_APPS.md`, `docs/KERNEL_SUBSYSTEMS.md`, `docs/TESTING.md`, `docs/NETWORK_SECURITY.md`, `docs/RESEARCH_OS.md`, and `docs/SCIENCE_ENGINE.md`.
+- Repository docs now include `docs/ARCHITECTURE.md`, `docs/RUSA.md`, `docs/RUSA_RUNTIME.md`, `docs/GUI_APPS.md`, `docs/KERNEL_SUBSYSTEMS.md`, `docs/TESTING.md`, `docs/NETWORK_SECURITY.md`, `docs/RESEARCH_OS.md`, `docs/SCIENCE_ENGINE.md`, `docs/MATHCORE.md`, and `docs/PROOFCORE.md`.
 - The boot path now starts networking, GUI compositor state, scheduler state, and the crosshair pointer by default.
 - GUI boot writes `/system/gui/state.txt` so autostart state is inspectable after startup.
 - GUI boot writes `/system/boot/startup.txt`, and `gui boot safe|recovery|logs` provides safe graphics mode, recovery terminal bridge, and startup log access.
@@ -161,6 +161,7 @@ The scanner reports the file, line, column, readable issue title, and plain-Engl
 - The GUI Terminal now captures real shell/console output from commands such as `pwd`, `help`, `lang`, `math`, `net`, and `tree` into its own window scrollback instead of only reporting that a command ran.
 - The GUI Terminal now has cursor-aware input editing with Left/Right/Home/End/Delete/Backspace and insertion at the cursor.
 - The GUI Terminal keeps a local command-history ring; Up recalls previous commands and Down moves forward/clears.
+- The GUI Terminal supports simple line selection, copy, and paste through `gui terminal select A [B]`, `gui terminal copy`, and `gui terminal paste`.
 - The GUI Terminal prompt draws a visible cursor aligned to the current input column.
 - Closing the last GUI window now returns to the wallpaper desktop instead of leaving an unclosable Terminal panel.
 - Keyboard handling covers Caps Lock, Num Lock, Scroll Lock, keypad navigation/numeric behavior, F1-F12, arrows, Home/End, Insert/Delete, PageUp/PageDown, left/right Ctrl, left/right Alt, and Super keys.
@@ -220,6 +221,9 @@ GUI app launcher:
 ```text
 gui app files      shows filesystem workspace and opens: tree /home
 gui app terminal   opens the inline GUI Terminal app
+gui terminal select 0 2
+gui terminal copy
+gui terminal paste
 gui app editor     opens the GUI-friendly hybrid Paper/Code editor
 gui app projects   shows Rusa project workspace actions
 gui app packages   shows package registry and compatibility actions
@@ -343,16 +347,17 @@ Inside the editor, use arrow keys to move between and within lines. Enter saves 
 - RAM filesystem supports directories, files, read/write/append, copy, move, stat, tree, and current working directory.
 - VFS layer tracks ramfs, procfs, sysfs, devfs, pkgfs, and mathfs namespaces.
 - Protected namespace write checks exist for `/proc`, `/system`, and `/boot`.
-- File descriptor layer added with `fd open/read/write/close/list`.
+- File descriptor layer added with `fd open/read/write/chunk/seek/tell/close/list`.
 - File descriptors now live in per-process descriptor tables with local fd numbers.
 - `fd list` shows the shell process table; `fd list PROC` and `fd all` inspect other process tables.
 - `fd openfor PROC PATH MODE` opens a descriptor in another process table for debugging.
-- File descriptors record owner PID, descriptor type, mode, path/label, and simple offset accounting.
+- File descriptors record owner PID, descriptor type, mode, path/label, and seek/tell offset accounting.
+- Append mode now appends to existing RAMFS content instead of replacing it.
 - Socket creation allocates a descriptor in the owning process table, so files and sockets share the same per-process namespace.
 - Socket descriptors can be used through `fd read` and `fd write`.
 - Stopping a process releases its descriptor table.
 - Block device layer added with an 8-sector RAM disk and save/load bridges.
-- Remaining work: real seek offsets, descriptor inheritance, file permissions, and persistent disk storage.
+- Remaining work: descriptor inheritance, richer file permissions, partial writes, and persistent disk storage.
 
 Examples:
 
@@ -418,16 +423,21 @@ TICK 24
 ## Scheduler, Processes, Jobs, Task Manager
 
 - Process table tracks pid, running state, priority, workload, CPU hints, and ticks.
-- Process entries now track context-switch counts and last-run timer ticks.
-- Process stop releases descriptors owned by that process.
+- Process entries now track lifecycle states, context-switch counts, and last-run timer ticks.
+- Process APIs include create, spawn, stop, kill, sleep, wake, yield, current-process lookup, priority changes, and structured table snapshots.
+- Process metadata includes parent PID, estimated memory, foreground/background role, and process-handle accounting.
+- Process handles let GUI/task-manager/security surfaces hold stable references to target processes.
+- Process stop releases descriptors and pauses a process; process kill terminates the row for stronger task-manager/security actions.
+- Local IPC messages, tiny pipe buffers, and simple signals are available for in-kernel app/runtime coordination.
 - Job table tracks named workload classes and tick accounting.
 - Scheduler has fixed task contexts for shell, logger, network, gui, compute, and idle.
 - Each scheduler task tracks state, quantum, run count, saved program counter, synthetic stack pointer, stack range, wake tick, and task step function.
 - Timer interrupts periodically dispatch scheduler tasks through `sched_on_timer`.
+- Scheduler compatibility APIs expose `scheduler_init`, `scheduler_tick`, `scheduler_pick_next`, and `scheduler_set_priority`.
 - `sched yield`, `sched step`, and `sched run N` manually drive task execution for debugging.
 - `sched trace NAME` prints a task context snapshot.
-- Task manager aggregates processes, jobs, and services with `taskman top`.
-- Remaining work: real CPU register save/restore, separate kernel stacks, blocking waits, and per-process resources.
+- Task manager aggregates processes, jobs, services, descriptors, memory estimates, process states, handles, and app/window mappings with `taskman top` and `taskman resources`.
+- Remaining work: real CPU register save/restore, separate kernel stacks, blocking waits, isolated address spaces, and larger IPC buffers.
 
 Examples:
 
@@ -442,8 +452,19 @@ sched quantum compute 12
 sched sleep network
 sched wake network
 taskman top
+taskman resources
 taskman fds
 taskman boost
+```
+
+API examples:
+
+```c
+int pid = process_create("worker", "user", "simulation", 44);
+process_spawn("worker");
+ipc_send(1, pid, "start");
+signal_send(pid, "sleep");
+scheduler_set_priority("compute", 9);
 ```
 
 ## GUI, Framebuffer, Vector Graphics
@@ -521,7 +542,7 @@ taskman boost
 - Settings Keyboard shows detected keyboard type and lock state, with GUI buttons for Caps, Num, and key listing.
 - Settings Display shows framebuffer mode and cursor style, with GUI buttons for dot, cross, and target cursors.
 - Settings Input shows mouse speed preference, pointer style, keyboard type, and bridges to `mouse status`.
-- Settings Privacy still includes quick GUI jumps into Security, Events, and Storage.
+- Settings Privacy shows master privacy, network visibility, cookie policy, device access, and telemetry state, with GUI toggles backed by the privacy subsystem.
 - Project/package/log/security/event/storage action buttons can launch their matching shell commands directly.
 - `gui close` now canonicalizes aliases, so `gui close net`, `gui close pkg`, and similar names close the visible app instead of leaving stale focus.
 - Screensaver-inspired wallpapers now render as coherent colored desktop backgrounds instead of scaled grayscale debug rasters.
@@ -724,7 +745,11 @@ pkg remove editor
 - Physics section supports scaled first-principles gravity, electric, magnetic, kinetic energy, orbital velocity, and field energy commands.
 - Math and physics update compute process/job accounting.
 - The GUI Math Lab exposes the same subsystem through tabbed panels for vector dot products, matrix determinants, modular group examples, first-principles physics, LaTeX conversion, and scientific job accounting.
-- `science.c` now provides a separate reusable science/physics engine module for units, dimensional checks, constants, numerical arrays, fitting, signal scaffolds, spectroscopy peaks, crystal lattices, and simulation job records.
+- `mathcore.c` provides a plugin registry for Symbolics, Numerical, Linear Algebra, Abstract Algebra, Graph Theory, Logic/Proof, Number Theory, Topology, Statistics, Physics, Visualization, and Notebook plugins.
+- MathCore also registers theorem entries, algorithm metadata, and math object-type metadata with explicit proof-status safety rules.
+- `proofcore.c` provides live proof-state infrastructure with goals, assumptions, steps, valid/invalid/incomplete/unknown statuses, plain-English explanations, suggestions, replay, and text export.
+- ProofCore registers its step checker as a `logic-proof` MathCore algorithm and accounts proof work to `proof-worker`.
+- `science.c` now provides a separate reusable science/physics engine module for units, dimensional checks, constants, numerical arrays, fitting, signal scaffolds, spectroscopy peaks, crystal lattices, simulation jobs, quantum states, materials records, band points, and phonon modes.
 - Science simulation jobs account work to the shared job table and update the compute process workload so Task Manager can see scientific activity.
 - `/science/constants.txt` and `/science/domains.txt` describe the boot-time science registry.
 
@@ -749,6 +774,19 @@ math phys grav 10 20 5
 math phys electric 3 -4 2
 math phys magnetic 2 7 5
 math phys fields 1 2 3 | 4 5 6
+mathcore plugins
+mathcore theorems
+mathcore algorithms
+mathcore objects
+mathcore run physics status
+mathcore test logic-proof
+proof list
+proof new demo Q
+proof assume 1 P
+proof step 1 exact P
+proof show 1
+proof export 1
+proof replay 1
 science status
 science unit 2 m cm
 science constant c
@@ -757,6 +795,10 @@ science fft 1 2 3 4
 science peaks
 science sim new raman peak-fit
 science sim run 1
+science quantum
+science materials
+science bands
+science phonons
 taskman top
 taskman fds
 ```
@@ -768,10 +810,10 @@ taskman fds
 - `project new NAME` now writes a real Rusa source template using `import`, `let`, `fn`, `while`, and `call`.
 - `project run NAME` executes the `.rusa` source through the loader and Rusa parser.
 - `project docs NAME` prints the project notes.
-- `research list|new|note|dataset|experiment|save` adds a research-grade project metadata layer separate from the older project scaffolder.
-- Research projects track descriptions, tags, notebook/result cells, datasets, experiments, and modified ticks.
+- `research list|new|note|dataset|experiment|task|timeline|graph|save` adds a research-grade project metadata layer separate from the older project scaffolder.
+- Research projects track descriptions, tags, notebook/result cells, datasets, experiments, tasks, timeline/logbook entries, graph relations, and modified ticks.
 - Research manifests are mirrored into `/research/project-N.md` so the file manager/editor/Rusa stdlib can discover them later.
-- `research.c` exposes reusable APIs for project creation/open/save, notebook cells, datasets, experiments, results, and table listings.
+- `research.c` exposes reusable APIs for project creation/open/save, notebook cells, notebook create/run/export, datasets, citations, experiments, results, todo tasks, timeline entries, graph relations, LaTeX export, and table listings.
 
 Examples:
 
@@ -785,7 +827,15 @@ research list
 research new paper first-principles-computing
 research note paper intro draft-the-idea
 research dataset paper samples /research/datasets/samples.csv x:int,y:int
+research citation paper smith2026 Paper local-source
 research experiment paper baseline math-vector-dot
+research result paper baseline done
+research task paper methods benji
+research timeline paper milestone first-draft
+research graph paper Rusa supports notebooks
+research notebook new paper lab-notebook
+research notebook export 1
+research latex paper
 research save paper
 ```
 
@@ -813,6 +863,10 @@ net up
 net socket tcp 8080
 net send 0 hello
 net recv 0
+fd open /tmp/fdtest.txt rw
+fd seek 0 0
+fd chunk 0
+fd tell 0
 taskman top
 ```
 
@@ -982,5 +1036,5 @@ Enter -> framebuffer terminal -> pwd/lang examples/edit works
 Latest QEMU selftest result:
 
 ```text
-selftest pass=185 fail=0
+selftest pass=260 fail=0
 ```

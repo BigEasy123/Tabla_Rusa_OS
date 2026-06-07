@@ -9,6 +9,10 @@
 #define SCIENCE_PEAK_MAX 12
 #define SCIENCE_CRYSTAL_MAX 6
 #define SCIENCE_SIM_MAX 8
+#define SCIENCE_QUANTUM_MAX 8
+#define SCIENCE_MATERIAL_MAX 8
+#define SCIENCE_BAND_MAX 12
+#define SCIENCE_PHONON_MAX 12
 
 struct science_array_slot {
     int used;
@@ -19,10 +23,18 @@ static struct science_array_slot arrays[SCIENCE_ARRAY_MAX];
 static struct spectroscopy_peak_info peaks[SCIENCE_PEAK_MAX];
 static struct crystal_lattice_info crystals[SCIENCE_CRYSTAL_MAX];
 static struct simulation_job_info sim_jobs[SCIENCE_SIM_MAX];
+static struct quantum_state_info quantum_states[SCIENCE_QUANTUM_MAX];
+static struct material_info materials[SCIENCE_MATERIAL_MAX];
+static struct band_point_info band_points[SCIENCE_BAND_MAX];
+static struct phonon_mode_info phonon_modes[SCIENCE_PHONON_MAX];
 static uint32_t next_array_id = 1;
 static uint32_t next_peak_id = 1;
 static uint32_t next_crystal_id = 1;
 static uint32_t next_sim_id = 1;
+static uint32_t next_quantum_id = 1;
+static uint32_t next_material_id = 1;
+static uint32_t next_band_id = 1;
+static uint32_t next_phonon_id = 1;
 
 struct unit_def {
     const char* name;
@@ -147,6 +159,8 @@ static const struct unit_def* unit_find(const char* name){
 void science_init(void){
     fs_mkdir("/science");
     fs_mkdir("/science/sim");
+    fs_mkdir("/science/materials");
+    fs_mkdir("/science/quantum");
     fs_write("/science/constants.txt",
         "c speed of light\n"
         "g earth gravity\n"
@@ -159,6 +173,13 @@ void science_init(void){
         "raman ir photoconductivity crystallography solid-state quantum statmech electromagnetism thermodynamics materials\n");
     spectroscopy_peak_add("raman", 520000, 900, "silicon optical phonon reference");
     crystal_create_lattice("silicon", "cubic", 5431, 5431, 5431, 90000, 90000, 90000);
+    int silicon = material_register("silicon", "Si", "solid", 1120);
+    quantum_state_create("particle-box", "n=1", 1000, "first scaffold quantum state");
+    if(silicon > 0){
+        band_point_add((uint32_t)silicon, "G", 0, 0);
+        band_point_add((uint32_t)silicon, "X", 1000, 1120);
+        phonon_mode_add((uint32_t)silicon, "T2g", 520000, "raman");
+    }
     fs_append_line("/var/log/system.log", "science: units constants arrays fitting signal spectroscopy crystals simulations online");
 }
 
@@ -421,11 +442,144 @@ uint32_t simulation_job_list(struct simulation_job_info* out, uint32_t max){
     return n;
 }
 
+int quantum_state_create(const char* name, const char* basis, int32_t energy_scaled, const char* note){
+    uint32_t i;
+    for(i = 0; i < SCIENCE_QUANTUM_MAX; i++){
+        if(quantum_states[i].id == 0){
+            quantum_states[i].id = next_quantum_id++;
+            copy_text(quantum_states[i].name, name, sizeof(quantum_states[i].name));
+            copy_text(quantum_states[i].basis, basis, sizeof(quantum_states[i].basis));
+            quantum_states[i].energy_scaled = energy_scaled;
+            copy_text(quantum_states[i].note, note, sizeof(quantum_states[i].note));
+            jobs_account("science-quantum", 3);
+            process_set_compute("compute", "science-quantum", 91, 70);
+            return (int)quantum_states[i].id;
+        }
+    }
+    return -1;
+}
+
+int quantum_state_get(uint32_t id, struct quantum_state_info* out){
+    uint32_t i;
+    for(i = 0; i < SCIENCE_QUANTUM_MAX; i++){
+        if(quantum_states[i].id == id){
+            if(out) *out = quantum_states[i];
+            return 0;
+        }
+    }
+    return -1;
+}
+
+uint32_t quantum_state_list(struct quantum_state_info* out, uint32_t max){
+    uint32_t i, n = 0;
+    for(i = 0; i < SCIENCE_QUANTUM_MAX; i++){
+        if(quantum_states[i].id){
+            if(out && n < max) out[n] = quantum_states[i];
+            n++;
+        }
+    }
+    return n;
+}
+
+int material_register(const char* name, const char* formula, const char* phase, int32_t band_gap_scaled){
+    uint32_t i;
+    for(i = 0; i < SCIENCE_MATERIAL_MAX; i++){
+        if(materials[i].id == 0){
+            materials[i].id = next_material_id++;
+            copy_text(materials[i].name, name, sizeof(materials[i].name));
+            copy_text(materials[i].formula, formula, sizeof(materials[i].formula));
+            copy_text(materials[i].phase, phase, sizeof(materials[i].phase));
+            materials[i].band_gap_scaled = band_gap_scaled;
+            jobs_account("science-materials", 2);
+            return (int)materials[i].id;
+        }
+    }
+    return -1;
+}
+
+int material_get(uint32_t id, struct material_info* out){
+    uint32_t i;
+    for(i = 0; i < SCIENCE_MATERIAL_MAX; i++){
+        if(materials[i].id == id){
+            if(out) *out = materials[i];
+            return 0;
+        }
+    }
+    return -1;
+}
+
+uint32_t material_list(struct material_info* out, uint32_t max){
+    uint32_t i, n = 0;
+    for(i = 0; i < SCIENCE_MATERIAL_MAX; i++){
+        if(materials[i].id){
+            if(out && n < max) out[n] = materials[i];
+            n++;
+        }
+    }
+    return n;
+}
+
+int band_point_add(uint32_t material_id, const char* label, int32_t k_scaled, int32_t energy_scaled){
+    uint32_t i;
+    if(material_get(material_id, 0) != 0) return -1;
+    for(i = 0; i < SCIENCE_BAND_MAX; i++){
+        if(band_points[i].id == 0){
+            band_points[i].id = next_band_id++;
+            band_points[i].material_id = material_id;
+            copy_text(band_points[i].label, label, sizeof(band_points[i].label));
+            band_points[i].k_scaled = k_scaled;
+            band_points[i].energy_scaled = energy_scaled;
+            jobs_account("science-band", 2);
+            return (int)band_points[i].id;
+        }
+    }
+    return -1;
+}
+
+uint32_t band_point_list(uint32_t material_id, struct band_point_info* out, uint32_t max){
+    uint32_t i, n = 0;
+    for(i = 0; i < SCIENCE_BAND_MAX; i++){
+        if(band_points[i].id && (!material_id || band_points[i].material_id == material_id)){
+            if(out && n < max) out[n] = band_points[i];
+            n++;
+        }
+    }
+    return n;
+}
+
+int phonon_mode_add(uint32_t material_id, const char* symmetry, int32_t frequency_scaled, const char* activity){
+    uint32_t i;
+    if(material_get(material_id, 0) != 0) return -1;
+    for(i = 0; i < SCIENCE_PHONON_MAX; i++){
+        if(phonon_modes[i].id == 0){
+            phonon_modes[i].id = next_phonon_id++;
+            phonon_modes[i].material_id = material_id;
+            copy_text(phonon_modes[i].symmetry, symmetry, sizeof(phonon_modes[i].symmetry));
+            phonon_modes[i].frequency_scaled = frequency_scaled;
+            copy_text(phonon_modes[i].activity, activity, sizeof(phonon_modes[i].activity));
+            jobs_account("science-phonon", 2);
+            return (int)phonon_modes[i].id;
+        }
+    }
+    return -1;
+}
+
+uint32_t phonon_mode_list(uint32_t material_id, struct phonon_mode_info* out, uint32_t max){
+    uint32_t i, n = 0;
+    for(i = 0; i < SCIENCE_PHONON_MAX; i++){
+        if(phonon_modes[i].id && (!material_id || phonon_modes[i].material_id == material_id)){
+            if(out && n < max) out[n] = phonon_modes[i];
+            n++;
+        }
+    }
+    return n;
+}
+
 void science_cmd(char* arg){
     char action[16];
     arg = (char*)first_arg(arg, action, sizeof(action));
     if(action[0] == 0 || str_eq(action, "status")){
-        console_puts("science: units constants arrays fit signal spectroscopy crystals simulation\n");
+        console_puts("science: units constants arrays fit signal spectroscopy crystals simulation quantum materials bands phonons\n");
         console_puts("domains: raman ir photoconductivity crystallography solid-state quantum statmech em thermo materials\n");
     } else if(str_eq(action, "unit")){
         char value[16], from[16], to[16];
@@ -508,7 +662,59 @@ void science_cmd(char* arg){
                 console_putc('\n');
             }
         }
+    } else if(str_eq(action, "quantum")){
+        struct quantum_state_info list[SCIENCE_QUANTUM_MAX];
+        uint32_t i, n = quantum_state_list(list, SCIENCE_QUANTUM_MAX);
+        for(i = 0; i < n; i++){
+            console_write_dec(list[i].id);
+            console_puts(" ");
+            console_puts(list[i].name);
+            console_puts(" basis=");
+            console_puts(list[i].basis);
+            console_puts(" E=");
+            print_scaled(list[i].energy_scaled);
+            console_putc('\n');
+        }
+    } else if(str_eq(action, "materials")){
+        struct material_info list[SCIENCE_MATERIAL_MAX];
+        uint32_t i, n = material_list(list, SCIENCE_MATERIAL_MAX);
+        for(i = 0; i < n; i++){
+            console_write_dec(list[i].id);
+            console_puts(" ");
+            console_puts(list[i].name);
+            console_puts(" ");
+            console_puts(list[i].formula);
+            console_puts(" gap=");
+            print_scaled(list[i].band_gap_scaled);
+            console_putc('\n');
+        }
+    } else if(str_eq(action, "bands")){
+        struct band_point_info list[SCIENCE_BAND_MAX];
+        uint32_t i, n = band_point_list(0, list, SCIENCE_BAND_MAX);
+        for(i = 0; i < n; i++){
+            console_write_dec(list[i].material_id);
+            console_puts(" ");
+            console_puts(list[i].label);
+            console_puts(" k=");
+            print_scaled(list[i].k_scaled);
+            console_puts(" E=");
+            print_scaled(list[i].energy_scaled);
+            console_putc('\n');
+        }
+    } else if(str_eq(action, "phonons")){
+        struct phonon_mode_info list[SCIENCE_PHONON_MAX];
+        uint32_t i, n = phonon_mode_list(0, list, SCIENCE_PHONON_MAX);
+        for(i = 0; i < n; i++){
+            console_write_dec(list[i].material_id);
+            console_puts(" ");
+            console_puts(list[i].symmetry);
+            console_puts(" ");
+            print_scaled(list[i].frequency_scaled);
+            console_puts(" ");
+            console_puts(list[i].activity);
+            console_putc('\n');
+        }
     } else {
-        console_puts("usage: science status|unit|constant|smooth|fft|peaks|sim\n");
+        console_puts("usage: science status|unit|constant|smooth|fft|peaks|sim|quantum|materials|bands|phonons\n");
     }
 }

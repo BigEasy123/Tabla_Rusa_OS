@@ -64,6 +64,22 @@ int privacy_allows_network(void){
     return master_privacy && network_allowed;
 }
 
+int privacy_master_enabled(void){
+    return master_privacy;
+}
+
+int privacy_network_enabled(void){
+    return network_allowed;
+}
+
+int privacy_devices_enabled(void){
+    return devices_allowed;
+}
+
+int privacy_telemetry_enabled(void){
+    return telemetry_allowed;
+}
+
 const char* privacy_cookie_policy(void){
     return cookie_policy;
 }
@@ -81,6 +97,40 @@ static void privacy_connect(void){
     network_allowed = 1;
     fs_append_line("/var/log/security.log", "privacy: network allowed");
     events_emit("privacy.network:on");
+}
+
+void privacy_set_master(int enabled){
+    master_privacy = enabled ? 1 : 0;
+    if(!master_privacy)
+        privacy_disconnect();
+    fs_append_line("/var/log/security.log", master_privacy ? "privacy: master switch on" : "privacy: master switch off");
+}
+
+void privacy_set_network(int enabled){
+    if(enabled)
+        privacy_connect();
+    else
+        privacy_disconnect();
+}
+
+void privacy_set_devices(int enabled){
+    devices_allowed = enabled ? 1 : 0;
+    fs_append_line("/var/log/security.log", devices_allowed ? "privacy: devices allowed" : "privacy: devices blocked");
+}
+
+void privacy_set_telemetry(int enabled){
+    telemetry_allowed = enabled ? 1 : 0;
+    fs_append_line("/var/log/security.log", telemetry_allowed ? "privacy: telemetry allowed" : "privacy: telemetry off");
+}
+
+void privacy_set_cookie_policy(const char* policy){
+    if(str_eq(policy, "block"))
+        cookie_policy = "block";
+    else if(str_eq(policy, "allow"))
+        cookie_policy = "allow";
+    else
+        cookie_policy = "ask";
+    fs_append_line("/var/log/security.log", "privacy: cookie policy changed");
 }
 
 static void privacy_status(void){
@@ -111,39 +161,37 @@ void privacy_cmd(char* arg){
     if(action[0] == 0 || str_eq(action, "status") || str_eq(action, "center")){
         privacy_status();
     } else if(str_eq(action, "on") || str_eq(action, "lock")){
-        master_privacy = 1;
-        fs_append_line("/var/log/security.log", "privacy: master switch on");
+        privacy_set_master(1);
         console_puts("privacy: master switch on\n");
     } else if(str_eq(action, "off")){
-        master_privacy = 0;
-        privacy_disconnect();
+        privacy_set_master(0);
         console_puts("privacy: master switch off, network disconnected\n");
     } else if(str_eq(action, "network")){
         const char* value = first_arg(rest, &rest);
         if(str_eq(value, "on")){
-            privacy_connect();
+            privacy_set_network(1);
             if(master_privacy)
                 console_puts("privacy: network allowed\n");
             else
                 console_puts("privacy: network marked on, but master privacy is off; use privacy on\n");
         } else if(str_eq(value, "off") || str_eq(value, "disconnect")){
-            privacy_disconnect();
+            privacy_set_network(0);
             console_puts("privacy: network disconnected\n");
         } else {
             console_puts("usage: privacy network on|off\n");
         }
     } else if(str_eq(action, "devices")){
         const char* value = first_arg(rest, &rest);
-        devices_allowed = str_eq(value, "off") ? 0 : 1;
+        privacy_set_devices(!str_eq(value, "off"));
         console_puts(devices_allowed ? "privacy: devices allowed\n" : "privacy: devices marked off\n");
     } else if(str_eq(action, "telemetry")){
         const char* value = first_arg(rest, &rest);
-        telemetry_allowed = str_eq(value, "on") ? 1 : 0;
+        privacy_set_telemetry(str_eq(value, "on"));
         console_puts(telemetry_allowed ? "privacy: telemetry allowed\n" : "privacy: telemetry off\n");
     } else if(str_eq(action, "cookies") || str_eq(action, "cookie")){
         const char* value = first_arg(rest, &rest);
         if(str_eq(value, "block") || str_eq(value, "ask") || str_eq(value, "allow")){
-            cookie_policy = str_eq(value, "block") ? "block" : (str_eq(value, "allow") ? "allow" : "ask");
+            privacy_set_cookie_policy(value);
             console_puts("privacy: cookie policy set to ");
             console_puts(cookie_policy);
             console_putc('\n');

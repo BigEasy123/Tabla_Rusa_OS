@@ -56,6 +56,25 @@ static void str_copy(char* dst, const char* src, size_t max){
     dst[i] = 0;
 }
 
+static size_t str_len(const char* s){
+    size_t len = 0;
+    while(s && s[len])
+        len++;
+    return len;
+}
+
+static void str_append(char* dst, const char* src, size_t max){
+    size_t i = 0;
+    size_t j = 0;
+    if(max == 0)
+        return;
+    while(dst[i] && i + 1 < max)
+        i++;
+    while(src && src[j] && i + 1 < max)
+        dst[i++] = src[j++];
+    dst[i] = 0;
+}
+
 static const char* first_arg(char* arg, char** rest){
     while(is_space(*arg)) arg++;
     char* start = arg;
@@ -207,19 +226,77 @@ int fd_read(int fd, const char** out){
     if(!entry) return -1;
     if(str_eq(entry->type, "socket"))
         return net_fd_read(entry->owner_pid, fd, out);
-    entry->offset++;
-    return fs_read(entry->path, out);
+    int r = fs_read(entry->path, out);
+    if(r == 0)
+        entry->offset = str_len(*out);
+    return r;
+}
+
+int fd_read_chunk(int fd, char* out, size_t max){
+    const char* text;
+    size_t len;
+    size_t i = 0;
+    struct fd_entry* entry = fd_find_for_pid(current_pid(), fd);
+    if(!entry || !out || max == 0)
+        return -1;
+    if(str_eq(entry->type, "socket"))
+        return -2;
+    if(fs_read(entry->path, &text) != 0)
+        return -3;
+    len = str_len(text);
+    if(entry->offset > len)
+        entry->offset = len;
+    while(text[entry->offset] && i + 1 < max){
+        out[i++] = text[entry->offset++];
+    }
+    out[i] = 0;
+    return (int)i;
 }
 
 int fd_write(int fd, const char* text){
     struct fd_entry* entry = fd_find_for_pid(current_pid(), fd);
+    char merged[512];
+    const char* existing;
     if(!entry || !fd_can_write_mode(entry->mode)) return -1;
     if(str_eq(entry->type, "socket"))
         return net_fd_write(entry->owner_pid, fd, text);
     if(!vfs_can_write(entry->path) || !security_can_write(entry->path)) return -2;
-    entry->offset++;
+    if(entry->mode[0] == 'a'){
+        merged[0] = 0;
+        if(fs_read(entry->path, &existing) == 0)
+            str_copy(merged, existing, sizeof(merged));
+        str_append(merged, text, sizeof(merged));
+        events_emit("fs.write");
+        if(fs_write(entry->path, merged) != 0)
+            return -3;
+        entry->offset = str_len(merged);
+        return 0;
+    }
     events_emit("fs.write");
-    return fs_write(entry->path, text);
+    if(fs_write(entry->path, text) != 0)
+        return -3;
+    entry->offset = str_len(text);
+    return 0;
+}
+
+int fd_seek(int fd, size_t offset){
+    const char* text;
+    size_t len;
+    struct fd_entry* entry = fd_find_for_pid(current_pid(), fd);
+    if(!entry || str_eq(entry->type, "socket"))
+        return -1;
+    if(fs_read(entry->path, &text) != 0)
+        return -2;
+    len = str_len(text);
+    entry->offset = offset > len ? len : offset;
+    return 0;
+}
+
+size_t fd_tell(int fd){
+    struct fd_entry* entry = fd_find_for_pid(current_pid(), fd);
+    if(!entry)
+        return 0;
+    return entry->offset;
 }
 
 int fd_close_process(uint32_t pid){
@@ -299,6 +376,20 @@ void fd_cmd(char* arg){
         const char* text;
         if(fd_read(id, &text) != 0) console_puts("fd: read failed\n");
         else console_puts(text);
+    } else if(str_eq(action, "chunk")){
+        int id = parse_i32(first_arg(rest, &rest));
+        char chunk[96];
+        if(fd_read_chunk(id, chunk, sizeof(chunk)) < 0) console_puts("fd: chunk failed\n");
+        else console_puts(chunk);
+    } else if(str_eq(action, "seek")){
+        int id = parse_i32(first_arg(rest, &rest));
+        size_t offset = (size_t)parse_i32(first_arg(rest, &rest));
+        if(fd_seek(id, offset) != 0) console_puts("fd: seek failed\n");
+        else console_puts("fd: seek ok\n");
+    } else if(str_eq(action, "tell")){
+        int id = parse_i32(first_arg(rest, &rest));
+        console_write_dec((uint32_t)fd_tell(id));
+        console_putc('\n');
     } else if(str_eq(action, "write")){
         int id = parse_i32(first_arg(rest, &rest));
         if(fd_write(id, rest) != 0) console_puts("fd: write failed\n");
@@ -317,6 +408,6 @@ void fd_cmd(char* arg){
             console_putc('\n');
         }
     } else {
-        console_puts("usage: fd list [PROC] | all | open PATH MODE | openfor PROC PATH MODE | read FD | write FD TEXT | close FD | closeproc PROC\n");
+        console_puts("usage: fd list [PROC] | all | open PATH MODE | openfor PROC PATH MODE | read FD | chunk FD | seek FD OFFSET | tell FD | write FD TEXT | close FD | closeproc PROC\n");
     }
 }

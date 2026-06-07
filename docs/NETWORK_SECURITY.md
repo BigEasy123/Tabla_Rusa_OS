@@ -112,6 +112,8 @@ Security Center panels:
 
 Network app shows live sockets, shield state, IP masking, packet counts, and loopback actions. Task Manager rows include per-process connection counts.
 
+Settings privacy controls show and toggle master privacy, network visibility, cookie policy, device access, and telemetry through the same reusable privacy APIs used by terminal commands.
+
 Security Center actions now call reusable APIs:
 
 - Connections: disconnect socket `0` and open firewall rules in Terminal.

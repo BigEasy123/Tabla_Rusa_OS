@@ -16,6 +16,7 @@
 #include "keyboard.h"
 #include "lang.h"
 #include "loader.h"
+#include "mathcore.h"
 #include "mathlib.h"
 #include "memory.h"
 #include "mouse.h"
@@ -24,6 +25,7 @@
 #include "paging.h"
 #include "policy.h"
 #include "privacy.h"
+#include "proofcore.h"
 #include "process.h"
 #include "project.h"
 #include "research.h"
@@ -1654,6 +1656,8 @@ static void kernel_shell_dispatch(char* line){
     else if(cmd_is(cmd,"ps") || cmd_is(cmd,"processes")) cmd_ps();
     else if(cmd_is(cmd,"compute") || cmd_is(cmd,"sci")) cmd_compute(arg);
     else if(cmd_is(cmd,"math")) math_cmd(arg);
+    else if(cmd_is(cmd,"mathcore") || cmd_is(cmd,"mplugin")) mathcore_cmd(arg);
+    else if(cmd_is(cmd,"proof")) proof_cmd(arg);
     else if(cmd_is(cmd,"gfx") || cmd_is(cmd,"vector")) gfx_cmd(arg);
     else if(cmd_is(cmd,"fb") || cmd_is(cmd,"framebuffer")) fb_cmd(arg);
     else if(cmd_is(cmd,"mouse") || cmd_is(cmd,"pointer")) mouse_cmd(arg);
@@ -1789,6 +1793,8 @@ void kmain(uint32_t mb_magic, uint32_t mb_info_addr){
     project_init();
     research_init();
     science_init();
+    mathcore_init();
+    proofcore_init();
     net_init();
     gui_init();
     fb_init();
