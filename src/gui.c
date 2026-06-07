@@ -9,6 +9,7 @@
 #include "mathlib.h"
 #include "memory.h"
 #include "net.h"
+#include "policy.h"
 #include "privacy.h"
 #include "process.h"
 #include "security.h"
@@ -63,6 +64,7 @@ static char rusa_lines[5][96] = {
 };
 static int math_tab = 0;
 static int settings_tab = 0;
+static int security_tab = 0;
 static uint32_t settings_mouse_speed = 2; /* 1=slow, 2=normal, 3=fast */
 static char taskman_selected[16] = "compute";
 static char math_lines[5][96] = {
@@ -827,6 +829,16 @@ static void taskman_boost_compute(void){
     taskman_select_process("compute");
 }
 
+static uint32_t taskman_connection_count(uint32_t owner_pid){
+    struct net_connection_info conns[4];
+    uint32_t total = net_connection_list(conns, 4);
+    uint32_t count = 0;
+    for(uint32_t i=0; i<total && i<4; i++)
+        if(conns[i].owner_pid == owner_pid)
+            count++;
+    return count;
+}
+
 static void copy_first_capture_line(char* out, const char* capture, uint32_t max){
     uint32_t i = 0;
     if(max == 0)
@@ -1469,7 +1481,15 @@ void gui_active_terminal_command(char* out, uint32_t max){
     else if(active_is("projects")) copy_text(out, "project list", max);
     else if(active_is("packages")) copy_text(out, "pkg list", max);
     else if(active_is("logs")) copy_text(out, "log show system", max);
-    else if(active_is("security")) copy_text(out, "security status", max);
+    else if(active_is("security")){
+        if(security_tab == 1) copy_text(out, "net connections", max);
+        else if(security_tab == 2) copy_text(out, "security permissions", max);
+        else if(security_tab == 3) copy_text(out, "service list", max);
+        else if(security_tab == 4) copy_text(out, "security scan /home/projects/demo.rusa", max);
+        else if(security_tab == 5) copy_text(out, "security permissions", max);
+        else if(security_tab == 6) copy_text(out, "security events", max);
+        else copy_text(out, "security status", max);
+    }
     else if(active_is("events")) copy_text(out, "event list", max);
     else if(active_is("storage")) copy_text(out, "block status", max);
     else if(active_is("inspector")) copy_text(out, "inspect memory", max);
@@ -1998,6 +2018,9 @@ static void draw_active_app_detail(void){
             append_text(row, num, sizeof(row));
             append_text(row, " win=", sizeof(row));
             append_text(row, taskman_app_for_process(proc->name), sizeof(row));
+            append_text(row, " conn=", sizeof(row));
+            u32_text(taskman_connection_count(proc->pid), num, sizeof(num));
+            append_text(row, num, sizeof(row));
             app_draw_text(246, 344 + i * 20, row, str_eq(proc->name, taskman_selected) ? 0x884C4C : 0x223040);
         }
         app_fill_rect(226, 490, 700, 58, 0x101820);
@@ -2167,28 +2190,106 @@ static void draw_active_app_detail(void){
         draw_button(466, 268, 96, "Network", 0x386878);
         draw_app_line(4, "Action", "Open Terminal runs: log show system");
     } else if(active_is("security")){
-        copy_text(line, security_is_locked() ? "secure mode on user " : "permissive mode user ", sizeof(line));
-        append_text(line, security_current_user(), sizeof(line));
-        draw_app_line(1, "Mode", line);
-        copy_text(line, privacy_allows_network() ? "network allowed cookies " : "network disconnected cookies ", sizeof(line));
-        append_text(line, privacy_cookie_policy(), sizeof(line));
-        draw_app_line(2, "Privacy", line);
-        copy_text(line, net_shield_enabled() ? "shield on mask " : "shield off mask ", sizeof(line));
-        append_text(line, net_ip_masking_enabled() ? "on" : "off", sizeof(line));
-        append_text(line, " packets=", sizeof(line));
-        u32_text(net_packet_count(), num, sizeof(num));
-        append_text(line, num, sizeof(line));
-        append_text(line, " port=", sizeof(line));
-        u32_text(net_listen_port(), num, sizeof(num));
-        append_text(line, num, sizeof(line));
-        draw_app_line(3, "Network", line);
-        draw_button(226, 268, 72, "Lock", 0x3C704C);
-        draw_button(312, 268, 86, "Unlock", 0x884C4C);
-        draw_button(412, 268, 82, "Ports", 0x386878);
-        draw_button(508, 268, 72, "Scan", 0x725C9A);
-        draw_button(594, 268, 72, "Audit", 0x4F7088);
-        draw_button(680, 268, 96, "Privacy", 0x345A7A);
-        draw_app_line(4, "Plain", "Lock blocks risky system changes; Ports shows every connection.");
+        draw_mode_button(226, 236, 82, "Overview", security_tab == 0, 0x345A7A);
+        draw_mode_button(320, 236, 82, "Conn", security_tab == 1, 0x386878);
+        draw_mode_button(414, 236, 82, "Perms", security_tab == 2, 0x725C9A);
+        draw_mode_button(508, 236, 92, "Services", security_tab == 3, 0x3C704C);
+        draw_mode_button(612, 236, 82, "Scan", security_tab == 4, 0x884C4C);
+        draw_mode_button(706, 236, 82, "Devices", security_tab == 5, 0x4F7088);
+        draw_mode_button(800, 236, 72, "Events", security_tab == 6, 0x887034);
+        draw_button(226, 276, 72, "Lock", 0x3C704C);
+        draw_button(312, 276, 86, "Unlock", 0x884C4C);
+        draw_button(412, 276, 82, "Ports", 0x386878);
+        draw_button(508, 276, 72, "Scan", 0x725C9A);
+        draw_button(594, 276, 72, "Audit", 0x4F7088);
+        draw_button(680, 276, 96, "Privacy", 0x345A7A);
+        app_fill_rect(226, 326, 700, 220, 0xF8FAFC);
+        if(security_tab == 1){
+            struct net_connection_info conns[4];
+            uint32_t n = net_connection_list(conns, 4);
+            for(uint32_t i=0; i<n && i<4; i++){
+                copy_text(row, "sock=", sizeof(row));
+                u32_text(conns[i].socket_id, num, sizeof(num));
+                append_text(row, num, sizeof(row));
+                append_text(row, " state=", sizeof(row));
+                append_text(row, conns[i].state == NET_CONN_CONNECTED ? "connected" :
+                                 (conns[i].state == NET_CONN_LISTENING ? "listening" : "other"), sizeof(row));
+                append_text(row, " owner=", sizeof(row));
+                u32_text(conns[i].owner_pid, num, sizeof(num));
+                append_text(row, num, sizeof(row));
+                append_text(row, " bytes=", sizeof(row));
+                u32_text(conns[i].bytes_tx + conns[i].bytes_rx, num, sizeof(num));
+                append_text(row, num, sizeof(row));
+                app_draw_text(250, 356 + i * 26, row, 0x223040);
+            }
+            if(n == 0) app_draw_text(250, 356, "No active connections.", 0x223040);
+            draw_button(250, 490, 128, "Disconnect 0", 0x884C4C);
+            draw_button(394, 490, 104, "Firewall", 0x386878);
+        } else if(security_tab == 2){
+            char perms[256];
+            security_list_permissions("", perms, sizeof(perms));
+            app_draw_text(250, 356, "Permissions: allow, deny, ask, inherited, default-deny", 0x223040);
+            app_draw_text(250, 386, perms[0] ? perms : "No permissions registered.", 0x5B3C9A);
+            app_draw_text(250, 416, "Use: allow APP RESOURCE or deny APP RESOURCE", 0x223040);
+            draw_button(250, 456, 128, "Allow Demo", 0x3C704C);
+            draw_button(394, 456, 128, "Deny Demo", 0x884C4C);
+        } else if(security_tab == 3){
+            struct service_registry_info services[6];
+            uint32_t n = service_list_registry(services, 6);
+            for(uint32_t i=0; i<n && i<5; i++){
+                copy_text(row, services[i].name, sizeof(row));
+                append_text(row, " ", sizeof(row));
+                append_text(row, services[i].state, sizeof(row));
+                append_text(row, " port=", sizeof(row));
+                u32_text(services[i].port, num, sizeof(num));
+                append_text(row, num, sizeof(row));
+                append_text(row, " health=", sizeof(row));
+                append_text(row, services[i].health, sizeof(row));
+                app_draw_text(250, 356 + i * 26, row, 0x223040);
+            }
+            draw_button(250, 490, 116, "List", 0x345A7A);
+            draw_button(382, 490, 116, "Stop Net", 0x884C4C);
+        } else if(security_tab == 4){
+            char scan[128];
+            security_scan_app("/home/projects/demo.rusa", scan, sizeof(scan));
+            app_draw_text(250, 356, "Scanner is lightweight, pattern-based, and not comprehensive.", 0x884C4C);
+            app_draw_text(250, 386, scan, 0x223040);
+            app_draw_text(250, 416, "Use Security Center to inspect and then decide.", 0x223040);
+        } else if(security_tab == 5){
+            app_draw_text(250, 356, "Keyboard: permission device.keyboard", 0x223040);
+            app_draw_text(250, 386, "Mouse: permission device.mouse", 0x223040);
+            app_draw_text(250, 416, "Framebuffer: permission device.framebuffer", 0x223040);
+            app_draw_text(250, 446, "Storage: permission device.storage", 0x223040);
+        } else if(security_tab == 6){
+            struct security_event_info events[4];
+            uint32_t n = security_get_events(events, 4);
+            for(uint32_t i=0; i<n && i<4; i++){
+                copy_text(row, "#", sizeof(row));
+                u32_text(events[i].id, num, sizeof(num));
+                append_text(row, num, sizeof(row));
+                append_text(row, " ", sizeof(row));
+                append_text(row, events[i].category, sizeof(row));
+                append_text(row, " ", sizeof(row));
+                append_text(row, events[i].decision, sizeof(row));
+                append_text(row, " ", sizeof(row));
+                append_text(row, events[i].app, sizeof(row));
+                app_draw_text(250, 356 + i * 26, row, 0x223040);
+            }
+        } else {
+            copy_text(line, security_is_locked() ? "secure mode on user " : "permissive mode user ", sizeof(line));
+            append_text(line, security_current_user(), sizeof(line));
+            app_draw_text(250, 356, line, 0x223040);
+            copy_text(line, privacy_allows_network() ? "network visible cookies " : "network disconnected cookies ", sizeof(line));
+            append_text(line, privacy_cookie_policy(), sizeof(line));
+            app_draw_text(250, 386, line, 0x223040);
+            copy_text(line, net_shield_enabled() ? "shield on mask " : "shield off mask ", sizeof(line));
+            append_text(line, net_ip_masking_enabled() ? "on" : "off", sizeof(line));
+            append_text(line, " packets=", sizeof(line));
+            u32_text(net_packet_count(), num, sizeof(num));
+            append_text(line, num, sizeof(line));
+            app_draw_text(250, 416, line, 0x223040);
+        }
+        draw_app_line(4, "Plain", "Every panel uses network/security tables, not decorative labels.");
     } else if(active_is("events")){
         draw_app_line(1, "Rules", "service net fs scheduler Rusa handlers");
         draw_app_line(2, "Model", "persistent event reactions from source files");
@@ -2711,7 +2812,14 @@ void gui_cmd(char* arg){
         gui_draw_desktop();
     } else if(str_eq(action, "security") || str_eq(action, "sec")){
         const char* sub = first_arg(rest, &rest);
-        if(str_eq(sub, "lock")){
+        if(str_eq(sub, "overview")) security_tab = 0;
+        else if(str_eq(sub, "connections") || str_eq(sub, "conn")) security_tab = 1;
+        else if(str_eq(sub, "permissions") || str_eq(sub, "perms")) security_tab = 2;
+        else if(str_eq(sub, "services")) security_tab = 3;
+        else if(str_eq(sub, "scanner") || str_eq(sub, "scan-panel")) security_tab = 4;
+        else if(str_eq(sub, "devices")) security_tab = 5;
+        else if(str_eq(sub, "events")) security_tab = 6;
+        else if(str_eq(sub, "lock")){
             char cmd[] = "lock";
             security_cmd(cmd);
             copy_text(launch_notice, "secure mode on", sizeof(launch_notice));
@@ -2731,8 +2839,35 @@ void gui_cmd(char* arg){
         } else if(str_eq(sub, "privacy")){
             request_terminal_command("privacy status", "privacy center");
             return;
+        } else if(str_eq(sub, "disconnect")){
+            const char* id_text = first_arg(rest, &rest);
+            uint32_t id = id_text[0] ? parse_u32(id_text) : 0;
+            if(net_socket_close(id) == 0)
+                copy_text(launch_notice, "connection disconnected", sizeof(launch_notice));
+            else
+                copy_text(launch_notice, "connection not found", sizeof(launch_notice));
+            security_tab = 1;
+        } else if(str_eq(sub, "allow") || str_eq(sub, "deny") || str_eq(sub, "ask")){
+            const char* app = first_arg(rest, &rest);
+            const char* resource = first_arg(rest, &rest);
+            enum security_permission_decision decision = SECURITY_PERMISSION_ASK;
+            if(str_eq(sub, "allow")) decision = SECURITY_PERMISSION_ALLOW;
+            else if(str_eq(sub, "deny")) decision = SECURITY_PERMISSION_DENY;
+            if(!app[0] || !resource[0]){
+                console_puts("usage: gui security allow|deny|ask APP RESOURCE\n");
+                return;
+            }
+            security_set_permission(app, resource, decision);
+            copy_text(launch_notice, "permission updated", sizeof(launch_notice));
+            security_tab = 2;
+        } else if(str_eq(sub, "firewall")){
+            request_terminal_command("firewall list", "firewall rules");
+            return;
+        } else if(str_eq(sub, "stop-net")){
+            request_terminal_command("service stop network", "stop network service");
+            return;
         } else if(sub[0]){
-            console_puts("usage: gui security lock|unlock|ports|scan|audit|privacy\n");
+            console_puts("usage: gui security lock|unlock|ports|scan|audit|privacy|disconnect|allow|deny|firewall\n");
             return;
         }
         gui_focus_app("security");
@@ -3621,7 +3756,16 @@ void gui_handle_click(uint32_t x, uint32_t y){
         if(sx < 322) request_terminal_command("log show system", "system log");
         else if(sx < 442) request_terminal_command("log show security", "security log");
         else request_terminal_command("log show network", "network log");
-    } else if(active_is("security") && app_is_open("security") && sy >= 268 && sy < 296 && sx >= 226 && sx < 776){
+    } else if(active_is("security") && app_is_open("security") && sy >= 236 && sy < 266 && sx >= 226 && sx < 872){
+        if(sx < 308) security_tab = 0;
+        else if(sx < 402) security_tab = 1;
+        else if(sx < 496) security_tab = 2;
+        else if(sx < 600) security_tab = 3;
+        else if(sx < 694) security_tab = 4;
+        else if(sx < 788) security_tab = 5;
+        else security_tab = 6;
+        copy_text(launch_notice, "security panel changed", sizeof(launch_notice));
+    } else if(active_is("security") && app_is_open("security") && sy >= 276 && sy < 304 && sx >= 226 && sx < 776){
         if(sx < 298){
             char cmd[] = "lock";
             security_cmd(cmd);
@@ -3634,6 +3778,28 @@ void gui_handle_click(uint32_t x, uint32_t y){
         else if(sx < 580) request_terminal_command("lang scan /home/projects/demo.rusa", "malicious-code scan");
         else if(sx < 666) request_terminal_command("security audit", "security audit");
         else request_terminal_command("privacy status", "privacy center");
+    } else if(active_is("security") && app_is_open("security") && security_tab == 1 && sy >= 490 && sy < 518 && sx >= 250 && sx < 498){
+        if(sx < 378){
+            if(net_socket_close(0) == 0)
+                copy_text(launch_notice, "connection 0 disconnected", sizeof(launch_notice));
+            else
+                copy_text(launch_notice, "connection 0 not active", sizeof(launch_notice));
+        } else {
+            request_terminal_command("firewall list", "firewall rules");
+            return;
+        }
+    } else if(active_is("security") && app_is_open("security") && security_tab == 2 && sy >= 456 && sy < 484 && sx >= 250 && sx < 522){
+        if(sx < 378){
+            security_set_permission("demo", "network.client", SECURITY_PERMISSION_ALLOW);
+            copy_text(launch_notice, "demo network allowed", sizeof(launch_notice));
+        } else {
+            security_set_permission("demo", "network.client", SECURITY_PERMISSION_DENY);
+            copy_text(launch_notice, "demo network denied", sizeof(launch_notice));
+        }
+    } else if(active_is("security") && app_is_open("security") && security_tab == 3 && sy >= 490 && sy < 518 && sx >= 250 && sx < 498){
+        if(sx < 366) request_terminal_command("services", "service registry");
+        else request_terminal_command("service stop network", "stop network service");
+        return;
     } else if(active_is("events") && app_is_open("events") && sy >= 268 && sy < 296 && sx >= 226 && sx < 582){
         if(sx < 322) request_terminal_command("event list", "event list");
         else if(sx < 442) request_terminal_command("event emit fs.write", "emit fs event");

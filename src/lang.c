@@ -53,6 +53,14 @@ struct rusa_runtime {
 static struct rusa_runtime runtime;
 static void (*call_handler)(char* command) = 0;
 
+#define RUSA_NATIVE_MAX 16
+struct rusa_native {
+    char name[24];
+    void (*fn)(void);
+};
+static struct rusa_native natives[RUSA_NATIVE_MAX];
+static uint32_t native_count = 0;
+
 struct rusa_diag {
     int active;
     char origin[64];
@@ -1161,6 +1169,198 @@ static int lang_preflight(const char* source){
         return -1;
     }
     return 0;
+}
+
+static int rusa_public_keyword(const char* text){
+    return str_eq(text, "import") || str_eq(text, "let") || str_eq(text, "set") ||
+           str_eq(text, "fn") || str_eq(text, "return") || str_eq(text, "if") ||
+           str_eq(text, "else") || str_eq(text, "while") || str_eq(text, "repeat") ||
+           str_eq(text, "nswitch") || str_eq(text, "case") || str_eq(text, "default") ||
+           str_eq(text, "parallel") || str_eq(text, "on") || str_eq(text, "run") ||
+           str_eq(text, "call") || str_eq(text, "print") || str_eq(text, "true") ||
+           str_eq(text, "false");
+}
+
+void rusa_lexer_init(struct rusa_lexer* lexer, const char* source){
+    if(!lexer) return;
+    lexer->source = source ? source : "";
+    lexer->cursor = lexer->source;
+    lexer->line = 1;
+    lexer->col = 1;
+}
+
+struct rusa_token rusa_lexer_next_token(struct rusa_lexer* lexer){
+    struct rusa_token token;
+    uint32_t i = 0;
+    const char* p;
+    token.kind = RUSA_TOKEN_EOF;
+    token.text[0] = 0;
+    token.line = lexer ? lexer->line : 1;
+    token.col = lexer ? lexer->col : 1;
+    if(!lexer || !lexer->cursor) return token;
+    p = lexer->cursor;
+    for(;;){
+        while(is_space(*p)){
+            if(*p == '\n'){
+                lexer->line++;
+                lexer->col = 1;
+            } else {
+                lexer->col++;
+            }
+            p++;
+        }
+        if(*p == '#'){
+            while(*p && *p != '\n'){
+                p++;
+                lexer->col++;
+            }
+        } else break;
+    }
+    token.line = lexer->line;
+    token.col = lexer->col;
+    if(*p == 0){
+        lexer->cursor = p;
+        return token;
+    }
+    if(is_name_start(*p)){
+        token.kind = RUSA_TOKEN_IDENTIFIER;
+        while(is_name_char(*p)){
+            if(i + 1 < sizeof(token.text)) token.text[i++] = *p;
+            p++;
+            lexer->col++;
+        }
+        token.text[i] = 0;
+        if(rusa_public_keyword(token.text))
+            token.kind = RUSA_TOKEN_KEYWORD;
+    } else if(*p >= '0' && *p <= '9'){
+        token.kind = RUSA_TOKEN_NUMBER;
+        while(*p >= '0' && *p <= '9'){
+            if(i + 1 < sizeof(token.text)) token.text[i++] = *p;
+            p++;
+            lexer->col++;
+        }
+        token.text[i] = 0;
+    } else if(*p == '"'){
+        token.kind = RUSA_TOKEN_STRING;
+        p++;
+        lexer->col++;
+        while(*p && *p != '"'){
+            if(i + 1 < sizeof(token.text)) token.text[i++] = *p;
+            p++;
+            lexer->col++;
+        }
+        if(*p == '"'){
+            p++;
+            lexer->col++;
+        }
+        token.text[i] = 0;
+    } else {
+        token.kind = RUSA_TOKEN_SYMBOL;
+        token.text[0] = *p;
+        token.text[1] = 0;
+        p++;
+        lexer->col++;
+    }
+    lexer->cursor = p;
+    return token;
+}
+
+int rusa_parse_source(const char* source, const char* origin, struct rusa_ast* out){
+    struct rusa_lexer lexer;
+    struct rusa_token token;
+    uint32_t statements = 0;
+    current_source = source ? source : "";
+    current_origin = origin ? origin : "<parse>";
+    diag_clear();
+    if(lang_preflight(current_source) != 0)
+        return -1;
+    rusa_lexer_init(&lexer, current_source);
+    do {
+        token = rusa_lexer_next_token(&lexer);
+        if(token.kind == RUSA_TOKEN_KEYWORD || token.kind == RUSA_TOKEN_IDENTIFIER)
+            statements++;
+    } while(token.kind != RUSA_TOKEN_EOF);
+    if(out){
+        out->source = current_source;
+        copy_text(out->origin, sizeof(out->origin), current_origin);
+        out->statement_count = statements;
+    }
+    return 0;
+}
+
+void rusa_ast_free(struct rusa_ast* ast){
+    if(!ast) return;
+    ast->source = 0;
+    ast->origin[0] = 0;
+    ast->statement_count = 0;
+}
+
+int rusa_typecheck(struct rusa_ast* ast){
+    if(!ast || !ast->source) return -1;
+    current_source = ast->source;
+    current_origin = ast->origin;
+    diag_clear();
+    return lang_preflight(ast->source);
+}
+
+int rusa_compile(struct rusa_ast* ast, struct rusa_bytecode* out){
+    if(rusa_typecheck(ast) != 0)
+        return -1;
+    if(out){
+        out->source = ast->source;
+        copy_text(out->origin, sizeof(out->origin), ast->origin);
+        out->op_count = ast->statement_count;
+    }
+    return 0;
+}
+
+void rusa_vm_init(struct rusa_vm* vm){
+    if(!vm) return;
+    vm->executed_ops = 0;
+    vm->last_status = 0;
+}
+
+int rusa_vm_execute(struct rusa_vm* vm, struct rusa_bytecode* bytecode, const char* args){
+    int result;
+    if(!bytecode || !bytecode->source) return -1;
+    result = lang_run_source(bytecode->source, bytecode->origin, args);
+    if(vm){
+        vm->executed_ops += bytecode->op_count;
+        vm->last_status = result;
+    }
+    return result;
+}
+
+int rusa_eval_source(const char* source, const char* origin, const char* args){
+    struct rusa_ast ast;
+    struct rusa_bytecode bytecode;
+    struct rusa_vm vm;
+    if(rusa_parse_source(source, origin, &ast) != 0)
+        return -1;
+    if(rusa_compile(&ast, &bytecode) != 0)
+        return -1;
+    rusa_vm_init(&vm);
+    return rusa_vm_execute(&vm, &bytecode, args);
+}
+
+int rusa_repl_step(const char* line){
+    return rusa_eval_source(line, "<repl>", "");
+}
+
+int rusa_register_native(const char* name, void (*fn)(void)){
+    if(!name || !name[0] || native_count >= RUSA_NATIVE_MAX) return -1;
+    copy_text(natives[native_count].name, sizeof(natives[native_count].name), name);
+    natives[native_count].fn = fn;
+    native_count++;
+    return 0;
+}
+
+uint32_t rusa_native_count(void){
+    return native_count;
+}
+
+int rusa_import_module(const char* name){
+    return import_module(name, 0);
 }
 
 int lang_run_source(const char* source, const char* origin, const char* args){

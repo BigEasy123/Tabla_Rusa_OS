@@ -22,9 +22,12 @@
 #include "net.h"
 #include "object.h"
 #include "paging.h"
+#include "policy.h"
 #include "privacy.h"
 #include "process.h"
 #include "project.h"
+#include "research.h"
+#include "science.h"
 #include "security.h"
 #include "sched.h"
 #include "service.h"
@@ -168,6 +171,16 @@ static void str_copy(char* dst, const char* src, size_t max){
         dst[i] = src[i];
         i++;
     }
+    dst[i] = 0;
+}
+
+static void str_append(char* dst, const char* src, size_t max){
+    size_t i = 0;
+    size_t j = 0;
+    if(max == 0) return;
+    while(dst[i] && i + 1 < max) i++;
+    while(src && src[j] && i + 1 < max)
+        dst[i++] = src[j++];
     dst[i] = 0;
 }
 
@@ -1651,6 +1664,8 @@ static void kernel_shell_dispatch(char* line){
     else if(cmd_is(cmd,"trx")) loader_cmd(arg);
     else if(cmd_is(cmd,"lang") || cmd_is(cmd,"rusa")) lang_cmd(arg);
     else if(cmd_is(cmd,"project") || cmd_is(cmd,"proj")) project_cmd(arg);
+    else if(cmd_is(cmd,"research") || cmd_is(cmd,"lab")) research_cmd(arg);
+    else if(cmd_is(cmd,"science") || cmd_is(cmd,"sci")) science_cmd(arg);
     else if(cmd_is(cmd,"object") || cmd_is(cmd,"obj")) object_cmd(arg);
     else if(cmd_is(cmd,"run")) {
         char* rest;
@@ -1659,12 +1674,62 @@ static void kernel_shell_dispatch(char* line){
         else if(loader_run(path, rest) != 0) console_puts("run: program not found\n");
     }
     else if(cmd_is(cmd,"service") || cmd_is(cmd,"svc")) service_cmd(arg);
+    else if(cmd_is(cmd,"services")) {
+        char list_cmd[] = "list";
+        service_cmd(list_cmd);
+    }
     else if(cmd_is(cmd,"user")) security_user_cmd(arg);
     else if(cmd_is(cmd,"cap") || cmd_is(cmd,"caps")) security_cap_cmd(arg);
     else if(cmd_is(cmd,"event") || cmd_is(cmd,"on")) events_cmd(arg);
     else if(cmd_is(cmd,"net") || cmd_is(cmd,"network")) net_cmd(arg);
+    else if(cmd_is(cmd,"netstat")) {
+        char netstat_cmd[] = "connections";
+        net_cmd(netstat_cmd);
+    }
+    else if(cmd_is(cmd,"ports")) {
+        char ports_cmd[] = "ports";
+        net_cmd(ports_cmd);
+    }
+    else if(cmd_is(cmd,"listen")) {
+        char buf[128] = "listen ";
+        str_append(buf, arg, sizeof(buf));
+        net_cmd(buf);
+    }
+    else if(cmd_is(cmd,"connect")) {
+        char buf[128] = "connect ";
+        str_append(buf, arg, sizeof(buf));
+        net_cmd(buf);
+    }
+    else if(cmd_is(cmd,"send")) {
+        char buf[128] = "send ";
+        str_append(buf, arg, sizeof(buf));
+        net_cmd(buf);
+    }
+    else if(cmd_is(cmd,"recv")) {
+        char buf[128] = "recv ";
+        str_append(buf, arg, sizeof(buf));
+        net_cmd(buf);
+    }
     else if(cmd_is(cmd,"privacy") || cmd_is(cmd,"control") || cmd_is(cmd,"connections")) privacy_cmd(arg);
     else if(cmd_is(cmd,"security") || cmd_is(cmd,"sec")) security_cmd(arg);
+    else if(cmd_is(cmd,"permissions")) {
+        char buf[128] = "permissions ";
+        str_append(buf, arg, sizeof(buf));
+        security_cmd(buf);
+    }
+    else if(cmd_is(cmd,"allow")) {
+        char buf[128] = "allow ";
+        str_append(buf, arg, sizeof(buf));
+        security_cmd(buf);
+    }
+    else if(cmd_is(cmd,"deny")) {
+        char buf[128] = "deny ";
+        str_append(buf, arg, sizeof(buf));
+        security_cmd(buf);
+    }
+    else if(cmd_is(cmd,"firewall")) {
+        policy_cmd(arg);
+    }
     else if(cmd_is(cmd,"job") || cmd_is(cmd,"jobs")) jobs_cmd(arg);
     else if(cmd_is(cmd,"sched") || cmd_is(cmd,"scheduler")) sched_cmd(arg);
     else if(cmd_is(cmd,"taskman") || cmd_is(cmd,"tasks") || cmd_is(cmd,"top")) taskman_cmd(arg);
@@ -1722,6 +1787,8 @@ void kmain(uint32_t mb_magic, uint32_t mb_info_addr){
     fd_init();
     lang_init();
     project_init();
+    research_init();
+    science_init();
     net_init();
     gui_init();
     fb_init();

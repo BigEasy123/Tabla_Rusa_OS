@@ -15,11 +15,15 @@
 #include "net.h"
 #include "object.h"
 #include "paging.h"
+#include "policy.h"
 #include "privacy.h"
 #include "process.h"
 #include "project.h"
+#include "research.h"
 #include "sched.h"
+#include "science.h"
 #include "security.h"
+#include "service.h"
 #include "shell.h"
 #include "timer.h"
 #include "tests.h"
@@ -497,6 +501,28 @@ void tests_cmd(void){
     gui_cmd(gui_security_scan);
     gui_active_terminal_command(gui_cmd_buf, sizeof(gui_cmd_buf));
     check_result("gui security scan bridge", text_has(gui_cmd_buf, "lang scan"));
+    char gui_security_conn[] = "security connections";
+    gui_cmd(gui_security_conn);
+    gui_active_terminal_command(gui_cmd_buf, sizeof(gui_cmd_buf));
+    check_result("gui security connections panel", text_has(gui_cmd_buf, "net connections"));
+    char gui_security_perms[] = "security permissions";
+    gui_cmd(gui_security_perms);
+    gui_active_terminal_command(gui_cmd_buf, sizeof(gui_cmd_buf));
+    check_result("gui security permissions panel", text_has(gui_cmd_buf, "permissions"));
+    char gui_security_events[] = "security events";
+    gui_cmd(gui_security_events);
+    gui_active_terminal_command(gui_cmd_buf, sizeof(gui_cmd_buf));
+    check_result("gui security events panel", text_has(gui_cmd_buf, "events"));
+    char gui_security_allow[] = "security allow demo network.client";
+    gui_cmd(gui_security_allow);
+    check_result("gui security allow permission", security_check_permission("demo", "network.client") == SECURITY_PERMISSION_ALLOW);
+    char gui_security_deny[] = "security deny demo network.client";
+    gui_cmd(gui_security_deny);
+    check_result("gui security deny permission", security_check_permission("demo", "network.client") == SECURITY_PERMISSION_DENY);
+    char gui_security_firewall[] = "security firewall";
+    gui_cmd(gui_security_firewall);
+    gui_active_terminal_command(gui_cmd_buf, sizeof(gui_cmd_buf));
+    check_result("gui security firewall bridge", text_has(gui_cmd_buf, "firewall list"));
     char gui_net_app[] = "app net";
     gui_cmd(gui_net_app);
     char gui_net_open[] = "network open";
@@ -516,6 +542,52 @@ void tests_cmd(void){
     check_result("vector gfx manifest", fs_stat("/system/gui/vector.txt", &type, &size) == 0);
     check_result("trx runtime docs", fs_stat("/share/docs/trx-runtime.txt", &type, &size) == 0);
     check_result("network stack descriptor", fs_stat("/system/net/stack.txt", &type, &size) == 0);
+    int research_id = research_project_create("selftest-research", "selftest research project", "test,science");
+    check_result("research project create", research_id > 0);
+    check_result("research note add", research_add_note((uint32_t)research_id, RESEARCH_CELL_RUSA, "model", "let x = 1") > 0);
+    check_result("research dataset add", research_register_dataset((uint32_t)research_id, "samples", "/research/datasets/samples.csv", "x:int,y:int") > 0);
+    check_result("research experiment add", research_track_experiment((uint32_t)research_id, "trial", "math vector dot") > 0);
+    check_result("research result add", research_record_result((uint32_t)research_id, "trial", "ok") > 0);
+    struct research_project_info research_projects[4];
+    check_result("research project table", research_project_list(research_projects, 4) > 0);
+    struct research_cell_info research_cells[4];
+    check_result("research notebook table", research_cell_list((uint32_t)research_id, research_cells, 4) > 0);
+    check_result("research save file", fs_stat("/research/project-2.md", &type, &size) == 0);
+    check_result("science descriptors", fs_stat("/science/constants.txt", &type, &size) == 0);
+    check_result("science unit convert", unit_convert(2 * 1000, "m", "cm") == 200 * 1000);
+    check_result("science unit dimension", unit_check_dimension("m", "km") && !unit_check_dimension("m", "s"));
+    int32_t constant_value;
+    char constant_unit[24];
+    check_result("science constant lookup", constants_find("c", &constant_value, constant_unit, sizeof(constant_unit)) == 0 && constant_value > 0);
+    int32_t arr_values[4] = {1, 2, 3, 4};
+    int science_array = array_create(arr_values, 4);
+    struct science_array_info science_arr_info;
+    check_result("science array create", science_array > 0 && array_get((uint32_t)science_array, &science_arr_info) == 0 &&
+                 science_arr_info.len == 4);
+    struct science_fit_result fit_result;
+    int32_t fit_x[3] = {0, 1, 2};
+    int32_t fit_y[3] = {1, 3, 5};
+    check_result("science linear fit", fit_linear(fit_x, fit_y, 3, &fit_result) == 0 && fit_result.a_scaled == 2000);
+    check_result("science polynomial scaffold", fit_polynomial(fit_y, 3, &fit_result) == 0);
+    check_result("science exponential scaffold", fit_exponential(fit_y, 3, &fit_result) == 0);
+    int32_t smooth_out[4];
+    check_result("science signal smooth", signal_smooth(arr_values, 4, smooth_out, 4) == 4 && smooth_out[1] == 2);
+    int32_t fft_out[4];
+    check_result("science fft scaffold", signal_fft(arr_values, 4, fft_out, 4) >= 2);
+    int peak_id = spectroscopy_peak_add("ir", 1600000, 750, "carbonyl stretch");
+    struct spectroscopy_peak_info peak_info;
+    check_result("science spectroscopy peak", peak_id > 0 && spectroscopy_peak_fit((uint32_t)peak_id, &peak_info) == 0 &&
+                 text_has(peak_info.assignment, "carbonyl"));
+    int crystal_id = crystal_create_lattice("test", "orthorhombic", 1000, 2000, 3000, 90000, 90000, 90000);
+    struct crystal_lattice_info crystal_info;
+    check_result("science crystal lattice", crystal_id > 0 && crystal_lattice_get((uint32_t)crystal_id, &crystal_info) == 0 &&
+                 crystal_info.c_scaled == 3000);
+    int sim_id = simulation_job_create("raman", "peak-fit", 91);
+    struct simulation_job_info sim_info;
+    check_result("science simulation job", sim_id > 0 && simulation_job_run((uint32_t)sim_id) == 0 &&
+                 simulation_job_status((uint32_t)sim_id, &sim_info) == 0 && text_has(sim_info.status, "complete"));
+    check_result("science simulation table", simulation_job_list(&sim_info, 1) > 0);
+    check_result("science array free", array_free((uint32_t)science_array) == 0);
     char net_socket_cmd[] = "socket udp 9999";
     char net_send_cmd[] = "send 0 selftest-packet";
     net_cmd(net_socket_cmd);
@@ -523,11 +595,73 @@ void tests_cmd(void){
     check_result("network packet queue", net_packet_count() >= 2);
     struct net_socket_info sock_info;
     check_result("network socket snapshot", net_socket_at(0, &sock_info) == 0 && sock_info.used && sock_info.local_port == 9999);
+    int srv = net_socket_create(1, "tcp");
+    int cli = net_socket_create(1, "tcp");
+    check_result("net api socket create", srv >= 0 && cli >= 0);
+    check_result("net api bind/listen", srv >= 0 && net_bind((uint32_t)srv, 10001) == 0 && net_listen((uint32_t)srv) == 0);
+    check_result("net api connect", cli >= 0 && net_connect((uint32_t)cli, 10001) == 0);
+    check_result("net api send", cli >= 0 && net_send((uint32_t)cli, "loopback-api") == 0);
+    const char* recv_msg = "";
+    check_result("net api recv", srv >= 0 && net_recv((uint32_t)srv, &recv_msg) == 0 && text_has(recv_msg, "loopback-api"));
+    struct net_connection_info conn_info[4];
+    check_result("net connection table", net_connection_list(conn_info, 4) >= 2);
+    struct net_port_info port_info[8];
+    check_result("net port table", net_port_list(port_info, 8) > 0);
+    if(cli >= 0) net_socket_close((uint32_t)cli);
+    if(srv >= 0) net_socket_close((uint32_t)srv);
+    int idle = net_socket_create(1, "udp");
+    check_result("net idle shutdown", idle >= 0 && net_shutdown_idle(0) > 0);
+    security_register_app("selftest-app", "selftest sandbox metadata");
+    security_register_capability("selftest-app", "network.loopback", "test loopback access");
+    security_set_permission("selftest-app", "network.client", SECURITY_PERMISSION_DENY);
+    check_result("security permission deny", security_check_permission("selftest-app", "network.client") == SECURITY_PERMISSION_DENY);
+    security_set_permission("selftest-app", "network.client", SECURITY_PERMISSION_ALLOW);
+    check_result("security permission allow", policy_check_network_access("selftest-app", 10001, 0));
+    int firewall_id = policy_firewall_add("selftest-app", 10001, 0, "selftest firewall block");
+    check_result("firewall add rule", firewall_id > 0);
+    check_result("firewall deny rule", !policy_check_network_access("selftest-app", 10001, 0));
+    check_result("firewall disable rule", policy_firewall_set_enabled((uint32_t)firewall_id, 0) == 0 &&
+                 policy_check_network_access("selftest-app", 10001, 0));
+    struct firewall_rule_info fw_info[4];
+    check_result("firewall rule table", policy_firewall_list(fw_info, 4) > 0);
+    char firewall_explain[96];
+    policy_firewall_explain((uint32_t)firewall_id, firewall_explain, sizeof(firewall_explain));
+    check_result("firewall explain rule", text_has(firewall_explain, "selftest firewall block"));
+    check_result("firewall remove rule", policy_firewall_remove((uint32_t)firewall_id) == 0);
+    security_log_event(SECURITY_WARNING, "network", "selftest-app", "port", "connect", "allow", "selftest event", "none");
+    struct security_event_info sec_events[4];
+    check_result("security event log api", security_get_events(sec_events, 4) > 0);
+    fs_write("/tmp/risky.rusa", "while true { print \"loop\" }\n");
+    char scan_out[128];
+    check_result("security scanner suspicious", security_scan_app("/tmp/risky.rusa", scan_out, sizeof(scan_out)) == SECURITY_SCAN_SUSPICIOUS);
+    service_register("selftest", 10002, 1, "selftest service", "network.server");
+    struct service_registry_info svc_info[6];
+    check_result("service registry api", service_list_registry(svc_info, 6) > 0);
     check_result("privacy network allowed", privacy_allows_network());
     check_result("block descriptor", fs_stat("/system/block.txt", &type, &size) == 0);
     check_result("Rusa docs", fs_stat("/share/rusa/keywords", &type, &size) == 0);
     check_result("Rusa stdlib", fs_stat("/lib/rusa/std.trx", &type, &size) == 0);
     check_result("Rusa source stdlib", fs_stat("/lib/rusa/std.rusa", &type, &size) == 0);
+    struct rusa_lexer lexer;
+    struct rusa_token token;
+    rusa_lexer_init(&lexer, "let n: int = 1");
+    token = rusa_lexer_next_token(&lexer);
+    check_result("Rusa lexer keyword", token.kind == RUSA_TOKEN_KEYWORD && text_has(token.text, "let"));
+    token = rusa_lexer_next_token(&lexer);
+    check_result("Rusa lexer identifier", token.kind == RUSA_TOKEN_IDENTIFIER && text_has(token.text, "n"));
+    struct rusa_ast ast;
+    struct rusa_bytecode bytecode;
+    struct rusa_vm vm;
+    check_result("Rusa parse API", rusa_parse_source("let n: int = 1\nprint n\n", "<api>", &ast) == 0 && ast.statement_count > 0);
+    check_result("Rusa typecheck API", rusa_typecheck(&ast) == 0);
+    check_result("Rusa compile API", rusa_compile(&ast, &bytecode) == 0 && bytecode.op_count > 0);
+    rusa_vm_init(&vm);
+    check_result("Rusa VM API", rusa_vm_execute(&vm, &bytecode, "") == 0 && vm.last_status == 0);
+    rusa_ast_free(&ast);
+    check_result("Rusa eval API", rusa_eval_source("let q: int = 4\nprint q\n", "<api-eval>", "") == 0);
+    check_result("Rusa REPL API", rusa_repl_step("print 7") == 0);
+    check_result("Rusa native registry API", rusa_register_native("selftest.native", 0) == 0 && rusa_native_count() > 0);
+    check_result("Rusa import API", rusa_import_module("std") == 0);
     check_result("Rusa source runtime", lang_run_source("let n: int = 1\nwhile n < 3 { set n = n + 1 }\nfn plus(a: int) { return a + 1 }\nprint plus(n)\n", "<selftest>", "") == 0);
     check_result("Rusa diagnostics", lang_run_source("let broken 3\n", "<selftest-bad>", "") != 0);
     check_result("Rusa nswitch", lang_run_source("let x: int = 2\nlet y: int = 5\nnswitch x, y { case 1, * { print \"bad\" } case 2, 5 { print \"hit\" } default { print \"miss\" } }\n", "<selftest-nswitch>", "") == 0);

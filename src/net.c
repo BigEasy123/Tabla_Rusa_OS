@@ -6,13 +6,16 @@
 #include "fs.h"
 #include "jobs.h"
 #include "privacy.h"
+#include "policy.h"
 #include "process.h"
 #include "service.h"
+#include "timer.h"
 #include "net.h"
 
 #define SOCKET_MAX 4
 #define PACKET_MAX 12
 #define PACKET_PAYLOAD_MAX 64
+#define PORT_MAX 8
 
 enum packet_dir {
     PKT_TX,
@@ -48,6 +51,19 @@ struct socket_entry {
     uint32_t tx_packets;
     uint32_t connect_attempts;
     uint32_t flood_score;
+    uint32_t peer_id;
+    uint32_t bytes_tx;
+    uint32_t bytes_rx;
+    uint32_t last_activity;
+};
+
+struct port_entry {
+    int used;
+    uint32_t port;
+    enum net_port_state state;
+    uint32_t owner_pid;
+    uint32_t socket_id;
+    const char* service;
 };
 
 struct net_stats {
@@ -65,6 +81,7 @@ static int ip_masking = 1;
 static uint32_t flood_threshold = 5;
 static struct socket_entry sockets[SOCKET_MAX];
 static struct net_packet packets[PACKET_MAX];
+static struct port_entry ports[PORT_MAX];
 static struct net_stats stats;
 static char fd_read_buffer[96];
 static uint32_t next_packet_id = 1;
@@ -120,6 +137,32 @@ static void copy_text(char* dst, size_t max, const char* src){
     dst[i] = 0;
 }
 
+static enum net_connection_state conn_state_from_text(const char* state){
+    if(str_eq(state, "LISTEN") || str_eq(state, "LISTENING")) return NET_CONN_LISTENING;
+    if(str_eq(state, "SYN-SENT") || str_eq(state, "CONNECTING")) return NET_CONN_CONNECTING;
+    if(str_eq(state, "ESTABLISHED") || str_eq(state, "CONNECTED") || str_eq(state, "OPEN")) return NET_CONN_CONNECTED;
+    if(str_eq(state, "CLOSING") || str_eq(state, "FIN-WAIT") || str_eq(state, "TIME-WAIT")) return NET_CONN_CLOSING;
+    if(str_eq(state, "ERROR")) return NET_CONN_ERROR;
+    return NET_CONN_CLOSED;
+}
+
+static const char* conn_state_text(enum net_connection_state state){
+    if(state == NET_CONN_LISTENING) return "LISTENING";
+    if(state == NET_CONN_CONNECTING) return "CONNECTING";
+    if(state == NET_CONN_CONNECTED) return "CONNECTED";
+    if(state == NET_CONN_CLOSING) return "CLOSING";
+    if(state == NET_CONN_ERROR) return "ERROR";
+    return "CLOSED";
+}
+
+static const char* port_state_text(enum net_port_state state){
+    if(state == NET_PORT_BOUND) return "BOUND";
+    if(state == NET_PORT_LISTENING) return "LISTENING";
+    if(state == NET_PORT_BLOCKED) return "BLOCKED";
+    if(state == NET_PORT_RESERVED) return "RESERVED";
+    return "FREE";
+}
+
 static uint32_t ip_loopback(void){
     return 0x7F000001U;
 }
@@ -154,6 +197,39 @@ static struct socket_entry* socket_by_id(uint32_t id){
 static struct socket_entry* socket_by_fd(uint32_t pid, int fd){
     for(int i=0; i<SOCKET_MAX; i++)
         if(sockets[i].used && sockets[i].owner_pid == pid && sockets[i].fd == fd)
+            return &sockets[i];
+    return 0;
+}
+
+static struct port_entry* port_by_number(uint32_t port){
+    for(int i=0; i<PORT_MAX; i++)
+        if(ports[i].used && ports[i].port == port)
+            return &ports[i];
+    return 0;
+}
+
+static struct port_entry* port_alloc(uint32_t port){
+    struct port_entry* existing = port_by_number(port);
+    if(existing)
+        return existing;
+    for(int i=0; i<PORT_MAX; i++){
+        if(!ports[i].used){
+            ports[i].used = 1;
+            ports[i].port = port;
+            ports[i].state = NET_PORT_FREE;
+            ports[i].owner_pid = 0;
+            ports[i].socket_id = 0;
+            ports[i].service = "loopback";
+            return &ports[i];
+        }
+    }
+    return 0;
+}
+
+static struct socket_entry* listener_for_port(uint32_t port){
+    for(int i=0; i<SOCKET_MAX; i++)
+        if(sockets[i].used && sockets[i].local_port == port &&
+           (str_eq(sockets[i].state, "LISTEN") || str_eq(sockets[i].state, "LISTENING")))
             return &sockets[i];
     return 0;
 }
@@ -194,20 +270,27 @@ static void socket_set_state(struct socket_entry* sock, const char* state){
 
 static void deliver_loopback(struct socket_entry* sock, const char* payload){
     struct net_packet* rx = alloc_packet();
+    struct socket_entry* dst = socket_by_id(sock->peer_id);
     if(!rx) return;
     packet_fill(rx, PKT_RX, sock->proto, sock->remote_port, sock->local_port, payload);
     if(rx->checksum != checksum_packet(rx->payload, rx->src_port, rx->dst_port)){
         stats.checksum_errors++;
         return;
     }
-    copy_text(sock->rx, sizeof(sock->rx), rx->payload);
-    sock->rx_packets++;
+    if(!dst)
+        dst = sock;
+    copy_text(dst->rx, sizeof(dst->rx), rx->payload);
+    dst->rx_packets++;
+    dst->bytes_rx += rx->len;
+    dst->last_activity = timer_ticks();
     stats.rx_packets++;
 }
 
 static int socket_send(struct socket_entry* sock, const char* payload){
     struct net_packet* tx;
-    if(str_eq(sock->proto, "tcp") && !str_eq(sock->state, "ESTABLISHED") && !str_eq(sock->state, "LISTEN")){
+    if(str_eq(sock->proto, "tcp") && !str_eq(sock->state, "ESTABLISHED") &&
+       !str_eq(sock->state, "CONNECTED") && !str_eq(sock->state, "LISTEN") &&
+       !str_eq(sock->state, "LISTENING")){
         stats.drops++;
         return -1;
     }
@@ -223,6 +306,8 @@ static int socket_send(struct socket_entry* sock, const char* payload){
     }
     packet_fill(tx, PKT_TX, sock->proto, sock->local_port, sock->remote_port, payload);
     sock->tx_packets++;
+    sock->bytes_tx += tx->len;
+    sock->last_activity = timer_ticks();
     stats.tx_packets++;
     deliver_loopback(sock, payload);
     fs_append_line("/var/log/network.log", "net: loopback packet queued");
@@ -231,48 +316,38 @@ static int socket_send(struct socket_entry* sock, const char* payload){
 }
 
 static void socket_open(const char* proto, uint32_t port){
+    int id;
+    struct socket_entry* sock;
     if(!privacy_allows_network()){
         console_puts("network blocked by privacy switch. Use: privacy network on\n");
         stats.drops++;
         return;
     }
-    for(int i=0; i<SOCKET_MAX; i++){
-        if(!sockets[i].used){
-            sockets[i].used = 1;
-            sockets[i].id = i;
-            sockets[i].proto = str_eq(proto, "udp") ? "udp" : "tcp";
-            sockets[i].state = str_eq(proto, "udp") ? "OPEN" : "LISTEN";
-            sockets[i].owner_pid = 1;
-            sockets[i].local_port = port;
-            sockets[i].remote_port = 0;
-            sockets[i].rx[0] = 0;
-            sockets[i].rx_packets = 0;
-            sockets[i].tx_packets = 0;
-            sockets[i].connect_attempts = 0;
-            sockets[i].flood_score = 0;
-            char label[16] = "socket:0";
-            label[7] = (char)('0' + i);
-            sockets[i].fd = fd_open_socket(label);
-            console_puts("socket id=");
-            console_write_dec((uint32_t)i);
-            console_puts(" fd=");
-            if(sockets[i].fd >= 0) console_write_dec((uint32_t)sockets[i].fd);
-            else console_puts("none");
-            console_puts(" ");
-            console_puts(sockets[i].proto);
-            console_puts(" owner=");
-            console_write_dec(sockets[i].owner_pid);
-            console_puts(" port=");
-            console_write_dec(port);
-            console_puts(" state=");
-            console_puts(sockets[i].state);
-            console_puts(" shield=");
-            console_puts(shield_enabled ? "on" : "off");
-            console_putc('\n');
-            return;
-        }
+    id = net_socket_create(1, proto);
+    if(id < 0 || net_bind((uint32_t)id, port) != 0){
+        if(id >= 0) net_socket_close((uint32_t)id);
+        console_puts("socket: table full or port unavailable\n");
+        return;
     }
-    console_puts("socket: table full\n");
+    if(str_eq(proto, "tcp")) net_listen((uint32_t)id);
+    else socket_set_state(&sockets[id], "OPEN");
+    sock = &sockets[id];
+    console_puts("socket id=");
+    console_write_dec((uint32_t)id);
+    console_puts(" fd=");
+    if(sock->fd >= 0) console_write_dec((uint32_t)sock->fd);
+    else console_puts("none");
+    console_puts(" ");
+    console_puts(sock->proto);
+    console_puts(" owner=");
+    console_write_dec(sock->owner_pid);
+    console_puts(" port=");
+    console_write_dec(port);
+    console_puts(" state=");
+    console_puts(sock->state);
+    console_puts(" shield=");
+    console_puts(shield_enabled ? "on" : "off");
+    console_putc('\n');
 }
 
 static void print_packet(const struct net_packet* pkt){
@@ -336,6 +411,221 @@ static void print_sockets(void){
     }
 }
 
+int net_socket_create(uint32_t owner_pid, const char* proto){
+    for(int i=0; i<SOCKET_MAX; i++){
+        if(!sockets[i].used){
+            char label[16] = "socket:0";
+            label[7] = (char)('0' + i);
+            sockets[i].used = 1;
+            sockets[i].id = i;
+            sockets[i].proto = str_eq(proto, "udp") ? "udp" : "tcp";
+            sockets[i].state = "CLOSED";
+            sockets[i].owner_pid = owner_pid ? owner_pid : 1;
+            sockets[i].local_port = 0;
+            sockets[i].remote_port = 0;
+            sockets[i].rx[0] = 0;
+            sockets[i].rx_packets = 0;
+            sockets[i].tx_packets = 0;
+            sockets[i].connect_attempts = 0;
+            sockets[i].flood_score = 0;
+            sockets[i].peer_id = SOCKET_MAX;
+            sockets[i].bytes_tx = 0;
+            sockets[i].bytes_rx = 0;
+            sockets[i].last_activity = timer_ticks();
+            sockets[i].fd = fd_open_socket(label);
+            return i;
+        }
+    }
+    stats.drops++;
+    return -1;
+}
+
+int net_bind(uint32_t socket_id, uint32_t port){
+    struct socket_entry* sock = socket_by_id(socket_id);
+    struct port_entry* entry;
+    if(!sock || port == 0)
+        return -1;
+    entry = port_alloc(port);
+    if(!entry || (entry->state != NET_PORT_FREE && entry->socket_id != socket_id)){
+        stats.drops++;
+        return -1;
+    }
+    sock->local_port = port;
+    sock->state = "BOUND";
+    sock->last_activity = timer_ticks();
+    entry->state = NET_PORT_BOUND;
+    entry->owner_pid = sock->owner_pid;
+    entry->socket_id = socket_id;
+    entry->service = str_eq(sock->proto, "udp") ? "udp-loopback" : "tcp-loopback";
+    return 0;
+}
+
+int net_listen(uint32_t socket_id){
+    struct socket_entry* sock = socket_by_id(socket_id);
+    struct port_entry* entry;
+    if(!sock || sock->local_port == 0)
+        return -1;
+    if(!policy_check_network_access("network", sock->local_port, 1))
+        return -1;
+    entry = port_by_number(sock->local_port);
+    if(!entry || entry->state == NET_PORT_BLOCKED || entry->state == NET_PORT_RESERVED)
+        return -1;
+    sock->state = "LISTENING";
+    sock->last_activity = timer_ticks();
+    entry->state = NET_PORT_LISTENING;
+    tcp_listen_port = (int)sock->local_port;
+    return 0;
+}
+
+int net_accept(uint32_t listener_id){
+    struct socket_entry* listener = socket_by_id(listener_id);
+    if(!listener || !str_eq(listener->state, "LISTENING"))
+        return -1;
+    return (int)listener_id;
+}
+
+int net_connect(uint32_t socket_id, uint32_t port){
+    struct socket_entry* sock = socket_by_id(socket_id);
+    struct socket_entry* listener;
+    if(!sock || !privacy_allows_network())
+        return -1;
+    if(!policy_check_network_access("network", port, 0))
+        return -1;
+    listener = listener_for_port(port);
+    sock->connect_attempts++;
+    if(shield_enabled && sock->connect_attempts > flood_threshold){
+        socket_set_state(sock, "CLOSED");
+        stats.drops++;
+        return -1;
+    }
+    if(!listener){
+        socket_set_state(sock, "ERROR");
+        stats.drops++;
+        return -1;
+    }
+    sock->remote_port = port;
+    sock->local_port = sock->local_port ? sock->local_port : (40000 + socket_id);
+    sock->peer_id = (uint32_t)listener->id;
+    listener->peer_id = socket_id;
+    socket_set_state(sock, "CONNECTING");
+    socket_set_state(sock, "CONNECTED");
+    listener->remote_port = sock->local_port;
+    listener->last_activity = timer_ticks();
+    sock->last_activity = timer_ticks();
+    return 0;
+}
+
+int net_send(uint32_t socket_id, const char* text){
+    struct socket_entry* sock = socket_by_id(socket_id);
+    if(!sock || !privacy_allows_network())
+        return -1;
+    if(str_eq(sock->state, "BOUND") && str_eq(sock->proto, "udp"))
+        socket_set_state(sock, "OPEN");
+    return socket_send(sock, text);
+}
+
+int net_recv(uint32_t socket_id, const char** out){
+    struct socket_entry* sock = socket_by_id(socket_id);
+    uint32_t i = 0;
+    const char* src;
+    if(!sock || !out)
+        return -1;
+    src = sock->rx[0] ? sock->rx : "<empty>";
+    while(src[i] && i + 1 < sizeof(fd_read_buffer)){
+        fd_read_buffer[i] = src[i];
+        i++;
+    }
+    fd_read_buffer[i] = 0;
+    *out = fd_read_buffer;
+    sock->rx[0] = 0;
+    sock->last_activity = timer_ticks();
+    return 0;
+}
+
+int net_poll(uint32_t socket_id){
+    struct socket_entry* sock = socket_by_id(socket_id);
+    if(!sock)
+        return -1;
+    return sock->rx[0] ? 1 : 0;
+}
+
+uint32_t net_shutdown_idle(uint32_t max_idle_ticks){
+    uint32_t now = timer_ticks();
+    uint32_t closed = 0;
+    for(uint32_t i=0; i<SOCKET_MAX; i++){
+        if(!sockets[i].used)
+            continue;
+        if(max_idle_ticks == 0 || (now >= sockets[i].last_activity && now - sockets[i].last_activity >= max_idle_ticks)){
+            if(net_socket_close(i) == 0)
+                closed++;
+        }
+    }
+    return closed;
+}
+
+int net_socket_close(uint32_t socket_id){
+    struct socket_entry* sock = socket_by_id(socket_id);
+    struct socket_entry* peer;
+    struct port_entry* entry;
+    if(!sock)
+        return -1;
+    peer = socket_by_id(sock->peer_id);
+    if(peer){
+        peer->peer_id = SOCKET_MAX;
+        socket_set_state(peer, "CLOSED");
+    }
+    entry = port_by_number(sock->local_port);
+    if(entry && entry->socket_id == socket_id){
+        entry->state = NET_PORT_FREE;
+        entry->owner_pid = 0;
+        entry->socket_id = 0;
+        entry->service = "free";
+    }
+    socket_set_state(sock, "CLOSED");
+    sock->used = 0;
+    return 0;
+}
+
+uint32_t net_connection_list(struct net_connection_info* out, uint32_t max){
+    uint32_t count = 0;
+    for(int i=0; i<SOCKET_MAX; i++){
+        if(!sockets[i].used)
+            continue;
+        if(out && count < max){
+            out[count].used = sockets[i].used;
+            out[count].socket_id = (uint32_t)sockets[i].id;
+            out[count].peer_id = sockets[i].peer_id;
+            out[count].owner_pid = sockets[i].owner_pid;
+            out[count].proto = sockets[i].proto;
+            out[count].state = conn_state_from_text(sockets[i].state);
+            out[count].local_port = sockets[i].local_port;
+            out[count].remote_port = sockets[i].remote_port;
+            out[count].bytes_tx = sockets[i].bytes_tx;
+            out[count].bytes_rx = sockets[i].bytes_rx;
+            out[count].last_activity = sockets[i].last_activity;
+        }
+        count++;
+    }
+    return count;
+}
+
+uint32_t net_port_list(struct net_port_info* out, uint32_t max){
+    uint32_t count = 0;
+    for(int i=0; i<PORT_MAX; i++){
+        if(!ports[i].used)
+            continue;
+        if(out && count < max){
+            out[count].port = ports[i].port;
+            out[count].state = ports[i].state;
+            out[count].owner_pid = ports[i].owner_pid;
+            out[count].socket_id = ports[i].socket_id;
+            out[count].service = ports[i].service;
+        }
+        count++;
+    }
+    return count;
+}
+
 void net_init(void){
     for(int i=0; i<SOCKET_MAX; i++){
         sockets[i].used = 0;
@@ -346,6 +636,18 @@ void net_init(void){
         sockets[i].state = "CLOSED";
         sockets[i].connect_attempts = 0;
         sockets[i].flood_score = 0;
+        sockets[i].peer_id = SOCKET_MAX;
+        sockets[i].bytes_tx = 0;
+        sockets[i].bytes_rx = 0;
+        sockets[i].last_activity = 0;
+    }
+    for(int i=0; i<PORT_MAX; i++){
+        ports[i].used = 0;
+        ports[i].port = 0;
+        ports[i].state = NET_PORT_FREE;
+        ports[i].owner_pid = 0;
+        ports[i].socket_id = 0;
+        ports[i].service = "free";
     }
     for(int i=0; i<PACKET_MAX; i++)
         packets[i].used = 0;
@@ -529,8 +831,60 @@ void net_cmd(char* arg){
         const char* proto = first_arg(rest, &rest);
         uint32_t port = parse_u32(rest);
         socket_open(proto, port);
+    } else if(str_eq(action, "listen")){
+        uint32_t port = parse_u32(rest);
+        int id = net_socket_create(1, "tcp");
+        if(id >= 0 && net_bind((uint32_t)id, port) == 0 && net_listen((uint32_t)id) == 0){
+            console_puts("listening socket=");
+            console_write_dec((uint32_t)id);
+            console_puts(" port=");
+            console_write_dec(port);
+            console_putc('\n');
+        } else {
+            console_puts("listen: unavailable or blocked\n");
+        }
     } else if(str_eq(action, "sockets")){
         print_sockets();
+    } else if(str_eq(action, "connections") || str_eq(action, "conn")){
+        struct net_connection_info conns[SOCKET_MAX];
+        uint32_t n = net_connection_list(conns, SOCKET_MAX);
+        for(uint32_t i=0; i<n && i<SOCKET_MAX; i++){
+            console_puts("conn sock=");
+            console_write_dec(conns[i].socket_id);
+            console_puts(" peer=");
+            if(conns[i].peer_id < SOCKET_MAX) console_write_dec(conns[i].peer_id);
+            else console_puts("none");
+            console_puts(" ");
+            console_puts(conn_state_text(conns[i].state));
+            console_puts(" local=");
+            console_write_dec(conns[i].local_port);
+            console_puts(" remote=");
+            console_write_dec(conns[i].remote_port);
+            console_puts(" tx=");
+            console_write_dec(conns[i].bytes_tx);
+            console_puts(" rx=");
+            console_write_dec(conns[i].bytes_rx);
+            console_putc('\n');
+        }
+    } else if(str_eq(action, "ports")){
+        struct net_port_info info[PORT_MAX];
+        uint32_t n = net_port_list(info, PORT_MAX);
+        for(uint32_t i=0; i<n && i<PORT_MAX; i++){
+            console_puts("port ");
+            console_write_dec(info[i].port);
+            console_puts(" ");
+            console_puts(port_state_text(info[i].state));
+            console_puts(" owner=");
+            console_write_dec(info[i].owner_pid);
+            console_puts(" socket=");
+            console_write_dec(info[i].socket_id);
+            console_puts(" service=");
+            console_puts(info[i].service);
+            console_putc('\n');
+        }
+    } else if(str_eq(action, "close")){
+        uint32_t id = parse_u32(first_arg(rest, &rest));
+        console_puts(net_socket_close(id) == 0 ? "socket closed\n" : "close: bad socket\n");
     } else if(str_eq(action, "fd")){
         uint32_t id = parse_u32(first_arg(rest, &rest));
         struct socket_entry* sock = socket_by_id(id);
@@ -546,46 +900,18 @@ void net_cmd(char* arg){
     } else if(str_eq(action, "connect")){
         uint32_t id = parse_u32(first_arg(rest, &rest));
         uint32_t port = parse_u32(first_arg(rest, &rest));
-        struct socket_entry* sock = socket_by_id(id);
-        if(!sock) console_puts("connect: bad socket\n");
-        else if(!privacy_allows_network()) {
-            stats.drops++;
-            console_puts("connect: blocked by privacy switch\n");
-        }
-        else if(shield_enabled && sock->connect_attempts++ >= flood_threshold){
-            socket_set_state(sock, "CLOSED");
-            stats.drops++;
-            console_puts("net shield: connection blocked and port closed after repeated attempts\n");
-        }
-        else {
-            sock->remote_port = port;
-            if(str_eq(sock->proto, "tcp")){
-                socket_set_state(sock, "SYN-SENT");
-                socket_set_state(sock, "ESTABLISHED");
-                socket_send(sock, "SYN");
-            }
-            console_puts("socket connected state=");
-            console_puts(sock->state);
-            console_putc('\n');
-        }
+        console_puts(net_connect(id, port) == 0 ? "socket connected state=CONNECTED\n" : "connect: blocked or unavailable\n");
     } else if(str_eq(action, "send")){
         uint32_t id = parse_u32(first_arg(rest, &rest));
-        struct socket_entry* sock = socket_by_id(id);
-        if(!sock) console_puts("send: bad socket\n");
-        else if(!privacy_allows_network()) {
-            stats.drops++;
-            console_puts("send: blocked by privacy switch\n");
-        }
-        else if(socket_send(sock, rest) != 0) console_puts("send: socket not ready\n");
+        if(net_send(id, rest) != 0) console_puts("send: socket not ready\n");
         else console_puts("packet queued on loopback\n");
     } else if(str_eq(action, "recv")){
         uint32_t id = parse_u32(first_arg(rest, &rest));
-        struct socket_entry* sock = socket_by_id(id);
-        if(!sock) console_puts("recv: bad socket\n");
+        const char* msg;
+        if(net_recv(id, &msg) != 0) console_puts("recv: bad socket\n");
         else {
-            console_puts(sock->rx[0] ? sock->rx : "<empty>");
+            console_puts(msg);
             console_putc('\n');
-            sock->rx[0] = 0;
         }
     } else if(str_eq(action, "packets") || str_eq(action, "trace")){
         print_packets();
@@ -631,6 +957,6 @@ void net_cmd(char* arg){
             packets[i].used = 0;
         console_puts("net: packet queues flushed\n");
     } else {
-        console_puts("usage: net status|iface|up|down|ip|udp|tcp PORT|arp|route|open tcp|udp PORT|socket tcp|udp PORT|fd ID|sockets|connect ID PORT|send ID MSG|recv ID|packets|trace|stats|shield [on|off|threshold N|mask on|off]|flush\n");
+        console_puts("usage: net status|iface|up|down|ip|udp|tcp PORT|arp|route|open tcp|udp PORT|listen PORT|socket tcp|udp PORT|fd ID|sockets|connections|ports|close ID|connect ID PORT|send ID MSG|recv ID|packets|trace|stats|shield [on|off|threshold N|mask on|off]|flush\n");
     }
 }

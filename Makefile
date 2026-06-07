@@ -8,7 +8,7 @@ LD := ld
 CFLAGS := -m32 -ffreestanding -fno-pic -fno-stack-protector -fno-builtin -O2 -Wall -Wextra
 LDFLAGS := -m elf_i386
 
-SRC_C := src/kmain.c src/idt.c src/keyboard.c src/mouse.c src/console.c src/timer.c src/heap.c src/memory.c src/paging.c src/fs.c src/process.c src/window.c src/mathlib.c src/events.c src/security.c src/privacy.c src/service.c src/vfs.c src/net.c src/gui.c src/jobs.c src/tests.c src/shell.c src/editor.c src/loader.c src/gfx.c src/taskman.c src/fd.c src/sched.c src/fb.c src/object.c src/block.c src/lang.c src/project.c src/kernel_modules.c
+SRC_C := src/kmain.c src/idt.c src/keyboard.c src/mouse.c src/console.c src/timer.c src/heap.c src/memory.c src/paging.c src/fs.c src/process.c src/window.c src/mathlib.c src/events.c src/security.c src/privacy.c src/service.c src/vfs.c src/net.c src/gui.c src/jobs.c src/tests.c src/shell.c src/editor.c src/loader.c src/gfx.c src/taskman.c src/fd.c src/sched.c src/fb.c src/object.c src/block.c src/lang.c src/project.c src/kernel_modules.c src/policy.c src/research.c src/science.c
 SRC_S := src/boot.S src/isr.S
 
 OBJ := $(patsubst src/%.c,$(BUILD)/%.o,$(SRC_C)) \

@@ -2,7 +2,7 @@
 
 This file is the living feature ledger for Tabla Rusa OS. Update it after each development prompt.
 
-Last updated: after adding Phase 15 developer documentation.
+Last updated: after modular networking/security expansion, research framework APIs, Rusa runtime API scaffolding, and the science engine module.
 
 ## Current Kernel Shape
 
@@ -11,7 +11,7 @@ Last updated: after adding Phase 15 developer documentation.
 - Boot includes ASCII intro, a full-stack autostart path, and `/home`, `/system`, `/proc`, `/pkg`, `/dev`, `/var/log`, `/share/docs`, and `/home/math`.
 - Boot writes `/system/kernel/modules.txt` and `/system/kernel/boundaries.txt` from `kernel_modules.c`, making subsystem ownership and future cleanup targets inspectable.
 - Kernel cleanup now has an explicit boundary descriptor for shell, editor, GUI, Rusa, FS, process, net, security, and math ownership.
-- Repository docs now include `docs/ARCHITECTURE.md`, `docs/RUSA.md`, `docs/GUI_APPS.md`, `docs/KERNEL_SUBSYSTEMS.md`, and `docs/TESTING.md`.
+- Repository docs now include `docs/ARCHITECTURE.md`, `docs/RUSA.md`, `docs/RUSA_RUNTIME.md`, `docs/GUI_APPS.md`, `docs/KERNEL_SUBSYSTEMS.md`, `docs/TESTING.md`, `docs/NETWORK_SECURITY.md`, `docs/RESEARCH_OS.md`, and `docs/SCIENCE_ENGINE.md`.
 - The boot path now starts networking, GUI compositor state, scheduler state, and the crosshair pointer by default.
 - GUI boot writes `/system/gui/state.txt` so autostart state is inspectable after startup.
 - GUI boot writes `/system/boot/startup.txt`, and `gui boot safe|recovery|logs` provides safe graphics mode, recovery terminal bridge, and startup log access.
@@ -38,6 +38,9 @@ Last updated: after adding Phase 15 developer documentation.
 - N-dimensional switch blocks support `nswitch`, `case`, `default`, comma-separated dimensions, and `*` wildcards.
 - `import std` loads reusable source from `/lib/rusa/std.rusa`.
 - `on "trigger" { ... }` registers persistent Rusa source event handlers with the OS event bus.
+- Public Rusa runtime APIs now expose lexer, parse, typecheck, compile, VM execute, eval, REPL-step, native registration, and import-module calls over the existing interpreter.
+- The lexer returns keyword, identifier, number, string, symbol, and EOF tokens with line/column tracking.
+- `rusa_compile` and `rusa_vm_execute` are scaffold descriptors over the interpreter, not a finished independent bytecode VM yet.
 - Rusa diagnostics now report file, line, column, plain-English explanation, source snippet, caret highlight, and a suggested fix.
 - `lang check PATH` validates a `.rusa` file and saves the latest diagnostic.
 - `lang scan PATH` reads every source line and reports suspicious code in plain English before it runs.
@@ -504,12 +507,13 @@ taskman boost
 - Math Lab tabs run the matching math command path to update process/job accounting and show useful in-window examples/results.
 - Math Lab now captures actual math command output into its result panel and draws compact vector, matrix, field, LaTeX, and job/proof previews.
 - `math logic implies|modus|and|or` adds a small proof-assistant starter surface with process/job accounting.
-- Task Manager now renders live process rows with state, priority, ticks, workload-to-window mapping, selected process details, and job queue rows.
+- Task Manager now renders live process rows with state, priority, ticks, workload-to-window mapping, connection count, selected process details, and job queue rows.
 - Task Manager GUI actions can select, focus, kill, restart, and boost compute workloads through `gui taskman ...` and in-window buttons.
 - The app window frame now has a softer desktop skin with a titlebar, shadow, window-control dots, lighter buttons, and cleaner selected tabs.
 - Projects, Packages, Logs, Security, Events, and Storage now have GUI app windows with Open Terminal bridges to their subsystem commands.
 - Security Center now shows secure/permissive mode, current user, privacy/cookie policy, network shield, IP masking, packet count, and listening port in plain language.
-- Security Center GUI buttons and `gui security ...` can lock/unlock, show ports, run malicious-code scans, open audit logs, and open the privacy status.
+- Security Center GUI buttons and `gui security ...` can lock/unlock, show ports, run malicious-code scans, open audit logs, open privacy status, disconnect socket `0`, update demo permissions, and open firewall rules.
+- Security Center now has Overview, Connections, Permissions, Services, Scanner, Devices, and Events panels backed by network/security/service tables.
 - Network app now shows live socket rows with protocol, state, local port, TX/RX counts, shield, IP masking, and flood threshold.
 - `gui network open|send|flush|shield` controls the socket-like loopback network surface from the desktop.
 - Settings now has tabs for Privacy, Hardware, Keyboard, Display, and Input.
@@ -610,6 +614,11 @@ fb blit
 - TX/RX loopback queues are represented by packet records; `net packets` and `net trace` dump them.
 - Packet checksums are computed for each queued packet and tracked in stats.
 - Socket table supports `net socket`, `net connect`, `net send`, `net recv`, and `net sockets` using loopback packet delivery.
+- Reusable socket APIs now include `net_socket_create`, `net_socket_close`, `net_bind`, `net_listen`, `net_accept`, `net_connect`, `net_send`, `net_recv`, `net_poll`, `net_connection_list`, and `net_port_list`.
+- Connection states are represented as CLOSED, LISTENING, CONNECTING, CONNECTED, CLOSING, and ERROR.
+- Port states are represented as FREE, BOUND, LISTENING, BLOCKED, and RESERVED.
+- Loopback client/server messaging now connects peer sockets, delivers messages through receive buffers, tracks bytes sent/received, and exposes connection/port tables.
+- `net_shutdown_idle` provides automatic idle socket shutdown infrastructure.
 - TCP sockets track simple state transitions such as `LISTEN`, `SYN-SENT`, and `ESTABLISHED`.
 - UDP sockets use an `OPEN` datagram path through the same packet queues.
 - `net stats` reports tx/rx/drops/checksum errors/state changes.
@@ -617,6 +626,8 @@ fb blit
 - `fd write SOCKET_FD MSG` and `fd read SOCKET_FD` operate on socket descriptors in the owning process table.
 - Network privacy gates block socket/open/send/connect actions when the master privacy or network switch is off.
 - DDoS hardening surface includes `net shield`, `net mask`, flood scores per socket, automatic port close after repeated connection/send patterns, and masked IP display by default.
+- Terminal aliases include `netstat`, `ports`, `listen`, `connect`, `send`, `recv`, `services`, `permissions`, `allow`, `deny`, and `firewall`.
+- `firewall list|add|remove|enable|disable|test|explain` is backed by the reusable policy rule table instead of cosmetic shield state.
 - Remaining work: real NIC driver, ARP cache mutation, ICMP packets, TCP retransmit/window handling, packet ring buffers, and external network I/O.
 
 Examples:
@@ -649,12 +660,18 @@ net shield mask off
 ## Security
 
 - Users, capabilities, secure mode, audit log, and namespace write checks exist.
+- Security now has structured event APIs, app sandbox metadata, app capability declarations, per-app permissions, and allow/deny/ask/default-deny decisions.
+- Policy APIs check network, file, device, and process access before protected operations.
+- Firewall policy APIs can add, remove, enable, disable, list, test, and explain allow/deny rules for specific apps or wildcard apps/ports.
+- `security events`, `security permissions`, `security capabilities`, `security scan`, `allow`, and `deny` expose the permission model from the terminal.
+- Service registry entries now track service port, owner process, state, permission requirement, enable/disable status, and health.
 - Kernel-facing packages are blocked in secure mode.
 - Privacy center provides layperson-facing connection controls: master privacy, network access, device access, telemetry, cookie policy, port review, connection review, and program accounting.
 - `privacy off` disconnects network sockets, stops the network service, and leaves connection state visible for review.
 - `privacy cookies block|ask|allow` records simple high-level cookie policy.
 - Rusa source security scanning catches risky control/network/filesystem patterns before source execution.
-- Remaining work: enforce security through all object paths, per-process credentials, signed packages, and syscall boundary.
+- The new security scanner is lightweight suspicious-pattern detection and is not comprehensive malware detection.
+- Remaining work: enforce security through all object paths, per-process credentials, signed packages, stronger sandbox boundaries, and syscall boundary.
 
 Examples:
 
@@ -707,6 +724,9 @@ pkg remove editor
 - Physics section supports scaled first-principles gravity, electric, magnetic, kinetic energy, orbital velocity, and field energy commands.
 - Math and physics update compute process/job accounting.
 - The GUI Math Lab exposes the same subsystem through tabbed panels for vector dot products, matrix determinants, modular group examples, first-principles physics, LaTeX conversion, and scientific job accounting.
+- `science.c` now provides a separate reusable science/physics engine module for units, dimensional checks, constants, numerical arrays, fitting, signal scaffolds, spectroscopy peaks, crystal lattices, and simulation job records.
+- Science simulation jobs account work to the shared job table and update the compute process workload so Task Manager can see scientific activity.
+- `/science/constants.txt` and `/science/domains.txt` describe the boot-time science registry.
 
 Examples:
 
@@ -729,6 +749,14 @@ math phys grav 10 20 5
 math phys electric 3 -4 2
 math phys magnetic 2 7 5
 math phys fields 1 2 3 | 4 5 6
+science status
+science unit 2 m cm
+science constant c
+science smooth 1 2 3 4
+science fft 1 2 3 4
+science peaks
+science sim new raman peak-fit
+science sim run 1
 taskman top
 taskman fds
 ```
@@ -740,6 +768,10 @@ taskman fds
 - `project new NAME` now writes a real Rusa source template using `import`, `let`, `fn`, `while`, and `call`.
 - `project run NAME` executes the `.rusa` source through the loader and Rusa parser.
 - `project docs NAME` prints the project notes.
+- `research list|new|note|dataset|experiment|save` adds a research-grade project metadata layer separate from the older project scaffolder.
+- Research projects track descriptions, tags, notebook/result cells, datasets, experiments, and modified ticks.
+- Research manifests are mirrored into `/research/project-N.md` so the file manager/editor/Rusa stdlib can discover them later.
+- `research.c` exposes reusable APIs for project creation/open/save, notebook cells, datasets, experiments, results, and table listings.
 
 Examples:
 
@@ -749,6 +781,12 @@ project list
 project docs orbit
 project edit orbit
 project run orbit
+research list
+research new paper first-principles-computing
+research note paper intro draft-the-idea
+research dataset paper samples /research/datasets/samples.csv x:int,y:int
+research experiment paper baseline math-vector-dot
+research save paper
 ```
 
 ## Useful Smoke Test Commands
@@ -944,5 +982,5 @@ Enter -> framebuffer terminal -> pwd/lang examples/edit works
 Latest QEMU selftest result:
 
 ```text
-selftest pass=127 fail=0
+selftest pass=185 fail=0
 ```

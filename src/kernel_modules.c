@@ -13,6 +13,9 @@ void kernel_modules_init(void){
         "process: process table, scheduler, jobs, task manager\n"
         "net: loopback packets, socket handles, privacy shield\n"
         "security: users, capabilities, audit, privacy center\n"
+        "policy: firewall rules and protected-resource checks\n"
+        "research: projects, notebooks, datasets, experiments, results\n"
+        "science: units, constants, arrays, fitting, signal, spectroscopy, crystals, simulations\n"
         "math: math/physics/proof commands and compute accounting\n");
     fs_write("/system/kernel/boundaries.txt",
         "rule: new app behavior belongs in gui.c or an app module, not kmain.c\n"
